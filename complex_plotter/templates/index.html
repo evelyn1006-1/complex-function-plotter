@@ -1,0 +1,1959 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Complex Function Plotter</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,650&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07100f;
+      --bg-2: #10201e;
+      --panel: rgba(12, 25, 26, 0.82);
+      --panel-strong: rgba(16, 33, 34, 0.96);
+      --line: rgba(160, 205, 198, 0.2);
+      --line-strong: rgba(160, 205, 198, 0.36);
+      --text: #edf7f3;
+      --muted: #a9bdb8;
+      --soft: #d6ebe5;
+      --accent: #78e0cf;
+      --accent-2: #f3c76b;
+      --danger: #ff8f8f;
+      --warning: #ffd37a;
+      --ok: #9cf0bd;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    }
+    * { box-sizing: border-box; }
+    body {
+      position: relative;
+      font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+      max-width: 1180px;
+      margin: 0 auto;
+      min-height: 100vh;
+      padding: 1.2rem;
+      background:
+        radial-gradient(circle at 12% 4%, rgba(120, 224, 207, 0.2), transparent 30rem),
+        radial-gradient(circle at 88% 0%, rgba(243, 199, 107, 0.14), transparent 26rem),
+        linear-gradient(135deg, var(--bg), var(--bg-2) 48%, #081312);
+      color: var(--text);
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent 72%);
+    }
+    h1 {
+      font-family: "Fraunces", "Georgia", serif;
+      font-size: clamp(2.15rem, 5vw, 4.4rem);
+      letter-spacing: -0.055em;
+      line-height: 0.95;
+      margin: 0 0 0.75rem;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      gap: 1rem;
+      align-items: end;
+      margin: 0.6rem 0 1rem;
+    }
+    .eyebrow {
+      margin: 0 0 0.55rem;
+      color: var(--accent-2);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    .hint { color: var(--muted); font-size: 0.98rem; line-height: 1.55; margin: 0; }
+    .hero-card {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 1rem;
+      background: linear-gradient(145deg, rgba(120, 224, 207, 0.13), rgba(243, 199, 107, 0.08));
+      box-shadow: var(--shadow);
+    }
+    .hero-card strong { display: block; color: var(--soft); margin-bottom: 0.35rem; }
+    .hero-card span { color: var(--muted); font-size: 0.92rem; line-height: 1.45; }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 0.8rem;
+    }
+    .wide { grid-column: span 2; }
+    .full { grid-column: 1 / -1; }
+    label {
+      display: block;
+      font-size: 0.9rem;
+      margin-bottom: 0.25rem;
+      color: var(--muted);
+    }
+    input, select, button {
+      width: 100%;
+      background: rgba(5, 13, 14, 0.8);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.65rem 0.75rem;
+      font-size: 1rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 150ms ease, box-shadow 150ms ease, transform 150ms ease, background 150ms ease;
+    }
+    input:focus, select:focus, button:focus-visible {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(120, 224, 207, 0.18);
+    }
+    button {
+      cursor: pointer;
+      font-weight: 700;
+      background: linear-gradient(180deg, rgba(120, 224, 207, 0.26), rgba(120, 224, 207, 0.08));
+    }
+    button:hover:not(:disabled) { transform: translateY(-1px); border-color: var(--line-strong); }
+    button:disabled { cursor: not-allowed; opacity: 0.48; transform: none; }
+    .examples { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.75rem 0 1rem; }
+    .examples button { width: auto; padding: 0.45rem 0.7rem; font-size: 0.9rem; }
+    #status {
+      min-height: 1.35rem;
+      color: var(--accent);
+      margin: 0.5rem 0 0.75rem;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.9rem;
+    }
+    #status[data-tone="error"] { color: var(--danger); }
+    #status[data-tone="warning"] { color: var(--warning); }
+    #status[data-tone="success"] { color: var(--ok); }
+    #plot {
+      width: 100%;
+      height: clamp(440px, 68vh, 720px);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(8, 18, 19, 0.9);
+      overflow: hidden;
+      box-shadow: var(--shadow);
+      touch-action: none;
+    }
+    #plot .plot-container, #plot .svg-container { touch-action: none; }
+    code {
+      color: var(--accent-2);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.93em;
+    }
+    .panel {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      border-radius: 18px;
+      padding: 0.9rem;
+      margin: 0.7rem 0 1rem;
+      box-shadow: var(--shadow);
+    }
+    .panel h3 { margin-top: 0; margin-bottom: 0.6rem; }
+    .mini {
+      font-size: 0.9rem;
+      color: var(--soft);
+      min-height: 1.2rem;
+      line-height: 1.45;
+    }
+    .result {
+      white-space: pre-wrap;
+      line-height: 1.45;
+      color: var(--text);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.92rem;
+      overflow-x: auto;
+    }
+    .hidden { display: none; }
+    .controls-panel { background: var(--panel-strong); }
+    .probe-card {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem 1rem;
+      align-items: center;
+      height: 2.65rem;
+      margin: 0.5rem 0 0.8rem;
+      padding: 0.6rem 0.75rem;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(7, 17, 18, 0.76);
+      color: var(--soft);
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.86rem;
+      overflow: hidden;
+    }
+    .probe-card strong { color: var(--accent-2); font-family: "IBM Plex Sans", sans-serif; }
+    .control-note {
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.35;
+      margin-top: 0.2rem;
+    }
+    .plot-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.55rem;
+      margin: 0.35rem 0 0.55rem;
+    }
+    .plot-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      width: auto;
+      padding: 0.36rem 0.58rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(7, 17, 18, 0.76);
+      color: var(--soft);
+      font-size: 0.82rem;
+      line-height: 1;
+    }
+    .plot-toggle input[type="checkbox"] {
+      appearance: auto;
+      accent-color: #2ea8ff;
+      width: 1rem;
+      height: 1rem;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      box-shadow: none;
+    }
+    .plot-toggle input[type="checkbox"]:focus,
+    .plot-toggle input[type="checkbox"]:focus-visible {
+      box-shadow: none;
+      outline: 2px solid rgba(120, 224, 207, 0.45);
+      outline-offset: 2px;
+    }
+    .function-badge {
+      display: inline-flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+      align-items: center;
+      min-height: 2.15rem;
+      padding: 0.48rem 0.68rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(120, 224, 207, 0.09);
+      color: var(--soft);
+      font-size: 0.87rem;
+      line-height: 1.25;
+    }
+    .class-row {
+      display: flex;
+      justify-content: flex-end;
+      align-items: flex-start;
+      margin-top: 0.35rem;
+    }
+    .class-stack {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.45rem;
+      max-width: min(100%, 640px);
+    }
+    .function-badge strong {
+      color: var(--accent-2);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.72rem;
+    }
+    .why-button {
+      width: auto;
+      padding: 0.24rem 0.48rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    .class-reason {
+      max-width: 100%;
+      padding: 0.55rem 0.7rem;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: rgba(5, 13, 14, 0.82);
+      color: var(--muted);
+      font-size: 0.84rem;
+      line-height: 1.4;
+      text-align: right;
+    }
+    .mode-hidden { display: none !important; }
+    .path-table-wrap {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: rgba(5, 13, 14, 0.46);
+    }
+    .path-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+      font-size: 0.88rem;
+    }
+    .path-table th, .path-table td {
+      border-bottom: 1px solid rgba(160, 205, 198, 0.12);
+      padding: 0.45rem;
+      text-align: left;
+      vertical-align: middle;
+    }
+    .path-table th {
+      color: var(--muted);
+      font-weight: 600;
+      background: rgba(120, 224, 207, 0.06);
+    }
+    .path-table input, .path-table select, .path-table button {
+      padding: 0.42rem 0.5rem;
+      font-size: 0.88rem;
+      border-radius: 9px;
+    }
+    .path-table button { width: auto; white-space: nowrap; }
+    @media (max-width: 900px) {
+      body { padding: 0.85rem; }
+      .hero { grid-template-columns: 1fr; }
+      .hero-card { display: none; }
+      .row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .wide { grid-column: 1 / -1; }
+    }
+    @media (max-width: 620px) {
+      .row { grid-template-columns: 1fr; }
+      .examples button { flex: 1 1 auto; }
+      #plot { height: 430px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">Complex analysis workspace</p>
+      <h1>Complex Function Plotter</h1>
+      <p class="hint">
+        Plot or integrate complex functions of <code>z</code>. Component variables <code>x = Re(z)</code> and <code>y = Im(z)</code>
+        are available. Piecewise forms work with <code>where(cond, a, b)</code> and <code>piecewise(cond1, val1, cond2, val2, default)</code>.
+        In integration mode, click inside the plot to build a path from line, circle, arc, Bézier, polyline, or ray segments.
+      </p>
+    </div>
+    <aside class="hero-card">
+      <strong>Calculator feel, complex-plane power.</strong>
+      <span>Use scroll zoom and pan in plot modes. Integration mode turns the plot into a precise click-to-place path editor.</span>
+    </aside>
+  </header>
+
+  <section class="panel controls-panel">
+  <div class="row">
+    <div class="wide">
+      <label for="expr">f(z)</label>
+      <input id="expr" value="where(x > 0, gamma(z), conj(z))">
+    </div>
+    <div>
+      <label for="mode">Mode</label>
+      <select id="mode">
+        <option value="colors">Colors</option>
+        <option value="vectors">Vectors</option>
+        <option value="transform">Transformation</option>
+        <option value="integration">Integration</option>
+      </select>
+    </div>
+    <div class="mode-control" data-modes="colors vectors integration">
+      <label for="n">Resolution</label>
+      <input id="n" type="number" min="100" max="800" step="50" value="350">
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <button id="plotBtn">Plot / Compute</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div><label for="xmin">xmin</label><input id="xmin" type="text" inputmode="decimal" value="-2"></div>
+    <div><label for="xmax">xmax</label><input id="xmax" type="text" inputmode="decimal" value="2"></div>
+    <div><label for="ymin">ymin</label><input id="ymin" type="text" inputmode="decimal" value="-2"></div>
+    <div><label for="ymax">ymax</label><input id="ymax" type="text" inputmode="decimal" value="2"></div>
+    <div class="mode-control" data-modes="vectors"><label for="stride">Vector stride</label><input id="stride" type="number" min="6" max="80" value="18"></div>
+    <div class="mode-control" data-modes="transform"><label for="frames">Animation frames</label><input id="frames" type="number" min="10" max="120" value="28"></div>
+  </div>
+
+  <div class="row">
+    <div class="mode-control" data-modes="vectors">
+      <label for="vectorCap">Vector cap</label>
+      <input id="vectorCap" type="text" inputmode="decimal" value="0.72">
+    </div>
+    <div class="mode-control" data-modes="transform">
+      <label for="gridLines">Grid lines</label>
+      <input id="gridLines" type="number" min="3" max="41" step="2" value="9">
+    </div>
+    <div class="mode-control" data-modes="transform">
+      <label for="gridSamples">Samples / line</label>
+      <input id="gridSamples" type="number" min="20" max="500" step="10" value="120">
+    </div>
+    <div class="wide">
+      <label>Viewport behavior</label>
+      <div class="control-note">Pan or scroll-zoom the plot, then press Plot / Compute to resample the currently visible region.</div>
+    </div>
+    <div>
+      <label>&nbsp;</label>
+      <button id="resetViewBtn" type="button">Reset view</button>
+    </div>
+  </div>
+
+  <div class="examples" id="plotExamples">
+    <button data-expr="z^2">z²</button>
+    <button data-expr="where(x > 0, z^2, conj(z))">piecewise</button>
+    <button data-expr="piecewise(x < -1, -1, (x >= -1) & (x <= 1), x + i*y^2, 1)">component</button>
+    <button data-expr="gamma(z)">gamma</button>
+    <button data-expr="erf(z)">erf</button>
+    <button data-expr="zeta(z)">zeta</button>
+    <button data-expr="lambertw(z)">lambertw</button>
+    <button data-expr="(z^3 - 1)/(z^3 + 1)">rational</button>
+  </div>
+  <div class="class-row">
+    <div class="class-stack">
+      <div id="functionBadge" class="function-badge"><strong>Class</strong><span>Checking...</span></div>
+      <div id="classReason" class="class-reason hidden"></div>
+    </div>
+  </div>
+  </section>
+
+  <div class="examples hidden" id="integrationExamples">
+    <button data-example="circle_residue">∮ 1/z around unit circle</button>
+    <button data-example="circle_two_poles">∮ exp(z)/(z^2+1) around |z|=2</button>
+    <button data-example="ray_infinite">∫₀^∞ 1/(1+z²) dz</button>
+  </div>
+
+  <div class="panel hidden" id="integrationPanel">
+    <h3>Integration path builder</h3>
+    <div class="row">
+      <div>
+        <label for="tool">Tool</label>
+        <select id="tool">
+          <option value="line">Line</option>
+          <option value="circle">Circle</option>
+          <option value="arc">Circular arc</option>
+          <option value="quadratic">Quadratic Bézier</option>
+          <option value="cubic">Cubic Bézier</option>
+          <option value="freeform">Polyline / freeform</option>
+          <option value="ray">Ray to infinity</option>
+        </select>
+      </div>
+      <div>
+        <label for="arcOrientation">Arc / circle orientation</label>
+        <select id="arcOrientation">
+          <option value="ccw">Counterclockwise</option>
+          <option value="cw">Clockwise</option>
+        </select>
+      </div>
+      <div>
+        <label for="useTheorem">Use theorem shortcut</label>
+        <select id="useTheorem">
+          <option value="yes">Yes, when safe</option>
+          <option value="no">Numerical only</option>
+        </select>
+      </div>
+      <div><label>&nbsp;</label><button id="undoBtn">Undo</button></div>
+      <div><label>&nbsp;</label><button id="closeLoopBtn">Close loop</button></div>
+      <div><label>&nbsp;</label><button id="reversePathBtn">Reverse orientation</button></div>
+    </div>
+    <div class="row">
+      <div><label>&nbsp;</label><button id="finishSegmentBtn">Finish freeform</button></div>
+      <div><label>&nbsp;</label><button id="clearPathBtn">Clear path</button></div>
+      <div class="wide"><label>Instructions</label><div class="mini" id="integrationInstructions"></div></div>
+      <div class="wide"><label>Path summary</label><div class="mini" id="pathSummary">Empty path.</div></div>
+    </div>
+    <div class="mini" id="integrationInfo"></div>
+    <h3>Editable path data</h3>
+    <div class="path-table-wrap" id="pathTableWrap"></div>
+    <div class="result" id="integrationResult"></div>
+  </div>
+
+  <div id="status"></div>
+  <div id="probe" class="probe-card"><strong>Probe</strong><span>Hover or click the plot to sample f(z).</span></div>
+  <div class="plot-toolbar">
+    <label class="plot-toggle mode-control" data-modes="colors vectors integration" for="highlightZeros">
+      <input id="highlightZeros" type="checkbox">
+      Highlight zeros
+    </label>
+    <label class="plot-toggle mode-control" data-modes="colors vectors" for="autoRender">
+      <input id="autoRender" type="checkbox">
+      Auto re-render
+    </label>
+  </div>
+  <div id="plot"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const DEFAULT_BOUNDS = {xmin: -2, xmax: 2, ymin: -2, ymax: 2};
+const PLOTLY_CONFIG = {
+  responsive: true,
+  displaylogo: false,
+  scrollZoom: true,
+  modeBarButtonsToRemove: ['lasso2d', 'select2d'],
+};
+const state = {
+  currentController: null,
+  integrationController: null,
+  requestSerial: 0,
+  integrationSerial: 0,
+  path: [],
+  pending: [],
+  serverIntegration: null,
+  plotBound: false,
+  pointerStart: null,
+  activePointers: new Map(),
+  pinchGesture: null,
+  pinchFrame: null,
+  suppressNextClick: false,
+  lastRenderedKind: null,
+  currentMode: $('mode').value,
+  viewportBounds: null,
+  suppressRelayoutSync: false,
+  integrationBackdrop: null,
+  backdropController: null,
+  probeController: null,
+  classifyController: null,
+  classifyTimer: null,
+  probeTimer: null,
+  autoRenderTimer: null,
+  lastProbePoint: null,
+};
+
+for (const btn of document.querySelectorAll('#plotExamples button')) {
+  btn.addEventListener('click', () => {
+    $('expr').value = btn.dataset.expr;
+    scheduleClassification({immediate: true});
+    if ($('mode').value === 'integration') {
+      clearIntegrationResult();
+      state.integrationBackdrop = null;
+      renderIntegrationPreview();
+    } else {
+      renderPlot();
+    }
+  });
+}
+
+for (const btn of document.querySelectorAll('#integrationExamples button')) {
+  btn.addEventListener('click', () => loadIntegrationExample(btn.dataset.example));
+}
+
+$('pathTableWrap').addEventListener('change', onPathEditorChange);
+$('pathTableWrap').addEventListener('click', onPathEditorClick);
+$('functionBadge').addEventListener('click', onClassBadgeClick);
+
+$('plotBtn').addEventListener('click', () => {
+  if ($('mode').value === 'integration') runIntegration();
+  else renderPlot();
+});
+$('expr').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    if ($('mode').value === 'integration') runIntegration();
+    else renderPlot();
+  }
+});
+$('expr').addEventListener('input', () => {
+  scheduleClassification();
+  if (modeIsIntegration()) {
+    clearIntegrationResult();
+    state.integrationBackdrop = null;
+    renderIntegrationPreview();
+  }
+});
+$('mode').addEventListener('change', onModeChange);
+$('tool').addEventListener('change', () => { state.pending = []; updateIntegrationHints(); renderIntegrationPreview(); });
+$('arcOrientation').addEventListener('change', () => { clearIntegrationResult(); renderIntegrationPreview(); });
+$('useTheorem').addEventListener('change', clearIntegrationResult);
+$('undoBtn').addEventListener('click', undoPathThing);
+$('closeLoopBtn').addEventListener('click', closeLoopLocally);
+$('reversePathBtn').addEventListener('click', () => { if (!state.pending.length) { state.path = reversePathLocal(state.path); clearIntegrationResult(); renderIntegrationPreview(); } });
+$('finishSegmentBtn').addEventListener('click', finishPendingSegment);
+$('clearPathBtn').addEventListener('click', () => { state.path = []; state.pending = []; clearIntegrationResult(); renderIntegrationPreview(); });
+$('autoRender').addEventListener('change', onAutoRenderChange);
+$('highlightZeros').addEventListener('change', () => {
+  state.integrationBackdrop = null;
+  if (modeIsIntegration()) renderIntegrationPreview();
+  else renderPlot();
+});
+$('resetViewBtn').addEventListener('click', () => {
+  state.viewportBounds = null;
+  setInputBounds(DEFAULT_BOUNDS);
+  clearIntegrationResult();
+  if (modeIsIntegration()) renderIntegrationPreview();
+  else renderPlot({forceInputBounds: true});
+});
+['xmin','xmax','ymin','ymax'].forEach(id => $(id).addEventListener('change', () => {
+  state.viewportBounds = null;
+  if ($('mode').value === 'integration') {
+    clearIntegrationResult();
+    state.integrationBackdrop = null;
+    renderIntegrationPreview();
+  }
+}));
+['n','stride','frames','vectorCap','gridLines','gridSamples'].forEach(id => $(id).addEventListener('change', () => {
+  if ($('mode').value === 'integration' && (id === 'n')) {
+    state.integrationBackdrop = null;
+    renderIntegrationPreview();
+  }
+}));
+window.addEventListener('keydown', (e) => {
+  if (!modeIsIntegration() || isTypingTarget(e)) return;
+  if (e.key === 'Escape' && state.pending.length) {
+    state.pending = [];
+    renderIntegrationPreview();
+  }
+  if ((e.key === 'Backspace' || e.key === 'Delete') && (state.pending.length || state.path.length)) {
+    e.preventDefault();
+    undoPathThing();
+  }
+});
+
+function currentBounds() {
+  return {
+    xmin: readNumericInput('xmin'),
+    xmax: readNumericInput('xmax'),
+    ymin: readNumericInput('ymin'),
+    ymax: readNumericInput('ymax'),
+  };
+}
+
+function readNumericInput(id) {
+  const raw = $(id).value.trim();
+  return parseNumericText(raw);
+}
+
+function parseNumericText(raw) {
+  const text = String(raw).trim();
+  if (text === '') return NaN;
+  if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) {
+    return Number(text);
+  }
+  const fraction = text.match(/^([+-]?(?:\d+(?:\.\d*)?|\.\d+))\s*\/\s*([+-]?(?:\d+(?:\.\d*)?|\.\d+))$/);
+  if (!fraction) return NaN;
+  const numerator = Number(fraction[1]);
+  const denominator = Number(fraction[2]);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) return NaN;
+  return numerator / denominator;
+}
+
+function setInputBounds(bounds) {
+  $('xmin').value = formatInputNumber(bounds.xmin);
+  $('xmax').value = formatInputNumber(bounds.xmax);
+  $('ymin').value = formatInputNumber(bounds.ymin);
+  $('ymax').value = formatInputNumber(bounds.ymax);
+}
+
+function formatInputNumber(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  return trimNumberString(n.toPrecision(10));
+}
+
+function boundsAreValid(b) {
+  return b && Number.isFinite(b.xmin) && Number.isFinite(b.xmax)
+    && Number.isFinite(b.ymin) && Number.isFinite(b.ymax)
+    && b.xmin < b.xmax && b.ymin < b.ymax;
+}
+
+function ensureValidBounds() {
+  const b = currentBounds();
+  if (!boundsAreValid(b)) {
+    setStatus('Bounds must be finite and satisfy xmin < xmax, ymin < ymax.', 'error');
+    return null;
+  }
+  return b;
+}
+
+function getPlotVisibleBounds() {
+  const gd = $('plot');
+  const layout = gd && gd._fullLayout;
+  if (!layout || !layout.xaxis || !layout.yaxis) return null;
+  const xr = layout.xaxis.range?.map(Number);
+  const yr = layout.yaxis.range?.map(Number);
+  if (!Array.isArray(xr) || !Array.isArray(yr)) return null;
+  const b = {xmin: xr[0], xmax: xr[1], ymin: yr[0], ymax: yr[1]};
+  return boundsAreValid(b) ? b : null;
+}
+
+function activeRenderBounds(options={}) {
+  if (options.forceInputBounds) {
+    state.viewportBounds = null;
+    return ensureValidBounds();
+  }
+  const live = getPlotVisibleBounds();
+  if (live && state.lastRenderedKind) {
+    state.viewportBounds = live;
+    setInputBounds(live);
+    return live;
+  }
+  if (state.viewportBounds && boundsAreValid(state.viewportBounds)) {
+    setInputBounds(state.viewportBounds);
+    return state.viewportBounds;
+  }
+  return ensureValidBounds();
+}
+
+function boundsForLayout() {
+  const b = currentBounds();
+  return boundsAreValid(b) ? b : DEFAULT_BOUNDS;
+}
+
+function rangesToBounds(xrange, yrange) {
+  if (Array.isArray(xrange) && Array.isArray(yrange)) {
+    const b = {xmin: Number(xrange[0]), xmax: Number(xrange[1]), ymin: Number(yrange[0]), ymax: Number(yrange[1])};
+    if (boundsAreValid(b)) return b;
+  }
+  return boundsForLayout();
+}
+
+function readBoundedInteger(id, min, max, label) {
+  const value = readNumericInput(id);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    setStatus(`${label} must be an integer from ${min} to ${max}.`, 'error');
+    return null;
+  }
+  return value;
+}
+
+function readBoundedFloat(id, min, max, label) {
+  const value = readNumericInput(id);
+  if (!Number.isFinite(value) || value < min || value > max) {
+    setStatus(`${label} must be a number from ${min} to ${max}.`, 'error');
+    return null;
+  }
+  return value;
+}
+
+function setStatus(message, tone='info') {
+  const el = $('status');
+  el.textContent = message || '';
+  el.dataset.tone = tone;
+}
+
+function setBusy(isBusy, label='Working...') {
+  $('plotBtn').disabled = isBusy;
+  $('plotBtn').textContent = isBusy ? label : 'Plot / Compute';
+}
+
+function autoRenderEnabled() {
+  return $('autoRender').checked && ['colors', 'vectors'].includes($('mode').value);
+}
+
+function cancelAutoRender() {
+  window.clearTimeout(state.autoRenderTimer);
+  state.autoRenderTimer = null;
+}
+
+function scheduleAutoRenderAfterCompletion(delay=1000) {
+  cancelAutoRender();
+  if (!autoRenderEnabled()) return;
+  state.autoRenderTimer = window.setTimeout(() => {
+    state.autoRenderTimer = null;
+    if (autoRenderEnabled()) renderPlot({auto:true});
+  }, delay);
+}
+
+function onAutoRenderChange() {
+  if (autoRenderEnabled()) {
+    scheduleAutoRenderAfterCompletion(1000);
+    setStatus('Auto re-render enabled. Next render will use the current viewport.', 'info');
+  } else {
+    cancelAutoRender();
+    setStatus('Auto re-render disabled.', 'info');
+  }
+}
+
+function clearIntegrationResult() {
+  state.serverIntegration = null;
+  $('integrationResult').textContent = '';
+}
+
+function clearPathState() {
+  state.path = [];
+  state.pending = [];
+  state.serverIntegration = null;
+  state.integrationBackdrop = null;
+  $('integrationResult').textContent = '';
+  renderPathEditor();
+}
+
+function updateModeControls() {
+  const mode = $('mode').value;
+  for (const el of document.querySelectorAll('[data-modes]')) {
+    const modes = el.dataset.modes.split(/\s+/);
+    el.classList.toggle('mode-hidden', !modes.includes(mode));
+  }
+  $('probe').classList.toggle('mode-hidden', modeIsIntegration());
+  if (!['colors', 'vectors'].includes(mode)) cancelAutoRender();
+}
+
+function isTypingTarget(event) {
+  const tag = event.target && event.target.tagName;
+  return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || event.target?.isContentEditable;
+}
+
+function modeIsIntegration() { return $('mode').value === 'integration'; }
+function complexPoint(x, y) { return [Number(x), Number(y)]; }
+function subP(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
+function dist(a, b) { const dx = a[0] - b[0], dy = a[1] - b[1]; return Math.hypot(dx, dy); }
+function angleAround(center, p) { return Math.atan2(p[1] - center[1], p[0] - center[0]); }
+function interpolate(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+
+function pathStart(path) {
+  if (!path.length) return null;
+  const seg = path[0];
+  if (seg.type === 'polyline') return seg.points[0];
+  return seg.start;
+}
+function pathEnd(path) {
+  if (!path.length) return null;
+  const seg = path[path.length - 1];
+  if (seg.type === 'line') return seg.end;
+  if (seg.type === 'arc') {
+    const c = seg.center, s = seg.start, e = seg.end;
+    const r = dist(c, s);
+    const th = angleAround(c, e);
+    return [c[0] + r * Math.cos(th), c[1] + r * Math.sin(th)];
+  }
+  if (seg.type === 'circle') return seg.start;
+  if (seg.type === 'quadratic' || seg.type === 'cubic') return seg.end;
+  if (seg.type === 'polyline') return seg.points[seg.points.length - 1];
+  if (seg.type === 'ray') return null;
+  return null;
+}
+function isClosedLocal(path) {
+  if (!path.length) return false;
+  if (path.length === 1 && path[0].type === 'circle') return true;
+  const a = pathStart(path), b = pathEnd(path);
+  return a && b && dist(a, b) < 1e-6;
+}
+
+function reverseSegmentLocal(seg) {
+  if (seg.type === 'line') return {type:'line', start: seg.end, end: seg.start};
+  if (seg.type === 'arc') return {type:'arc', center: seg.center, start: pathEnd([seg]), end: seg.start, ccw: !seg.ccw};
+  if (seg.type === 'circle') return {type:'circle', center: seg.center, start: seg.start, ccw: !seg.ccw};
+  if (seg.type === 'quadratic') return {type:'quadratic', start: seg.end, control: seg.control, end: seg.start};
+  if (seg.type === 'cubic') return {type:'cubic', start: seg.end, control1: seg.control2, control2: seg.control1, end: seg.start};
+  if (seg.type === 'polyline') return {type:'polyline', points: [...seg.points].reverse()};
+  if (seg.type === 'ray') {
+    const dir = subP(seg.through, seg.start);
+    const m = Math.hypot(dir[0], dir[1]) || 1;
+    return {type:'ray', start: seg.start, through: [seg.start[0] - dir[0] / m, seg.start[1] - dir[1] / m]};
+  }
+  return seg;
+}
+function reversePathLocal(path) { return [...path].reverse().map(reverseSegmentLocal); }
+
+function sampleSegment(seg, n=120) {
+  const pts = [];
+  const bounds = boundsForLayout();
+  if (seg.type === 'line') {
+    for (let i = 0; i < n; i++) pts.push(interpolate(seg.start, seg.end, i / (n - 1)));
+  } else if (seg.type === 'circle') {
+    const c = seg.center, s = seg.start;
+    const r = dist(c, s);
+    const t0 = angleAround(c, s);
+    const delta = seg.ccw ? 2 * Math.PI : -2 * Math.PI;
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const th = t0 + delta * t;
+      pts.push([c[0] + r * Math.cos(th), c[1] + r * Math.sin(th)]);
+    }
+  } else if (seg.type === 'arc') {
+    const c = seg.center, s = seg.start, e = seg.end;
+    const r = dist(c, s);
+    let a0 = angleAround(c, s), a1 = angleAround(c, e);
+    let delta;
+    if (seg.ccw) {
+      delta = ((a1 - a0) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+      if (delta < 1e-9) delta = 2 * Math.PI;
+    } else {
+      delta = -(((a0 - a1) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI));
+      if (Math.abs(delta) < 1e-9) delta = -2 * Math.PI;
+    }
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      const th = a0 + delta * t;
+      pts.push([c[0] + r * Math.cos(th), c[1] + r * Math.sin(th)]);
+    }
+  } else if (seg.type === 'quadratic') {
+    const p0 = seg.start, p1 = seg.control, p2 = seg.end;
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1), omt = 1 - t;
+      pts.push([
+        omt * omt * p0[0] + 2 * omt * t * p1[0] + t * t * p2[0],
+        omt * omt * p0[1] + 2 * omt * t * p1[1] + t * t * p2[1],
+      ]);
+    }
+  } else if (seg.type === 'cubic') {
+    const p0 = seg.start, p1 = seg.control1, p2 = seg.control2, p3 = seg.end;
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1), omt = 1 - t;
+      pts.push([
+        omt**3 * p0[0] + 3 * omt * omt * t * p1[0] + 3 * omt * t * t * p2[0] + t**3 * p3[0],
+        omt**3 * p0[1] + 3 * omt * omt * t * p1[1] + 3 * omt * t * t * p2[1] + t**3 * p3[1],
+      ]);
+    }
+  } else if (seg.type === 'polyline') {
+    return seg.points.slice();
+  } else if (seg.type === 'ray') {
+    const d = subP(seg.through, seg.start);
+    const m = Math.hypot(d[0], d[1]) || 1;
+    const u = [d[0] / m, d[1] / m];
+    const candidates = [];
+    if (Math.abs(u[0]) > 1e-12) {
+      candidates.push((bounds.xmin - seg.start[0]) / u[0], (bounds.xmax - seg.start[0]) / u[0]);
+    }
+    if (Math.abs(u[1]) > 1e-12) {
+      candidates.push((bounds.ymin - seg.start[1]) / u[1], (bounds.ymax - seg.start[1]) / u[1]);
+    }
+    const positive = candidates.filter(v => v > 0);
+    const L = Math.max(positive.length ? Math.max(...positive) : 4.0, 1.0);
+    for (let i = 0; i < n; i++) {
+      const t = i / (n - 1);
+      pts.push([seg.start[0] + u[0] * L * t, seg.start[1] + u[1] * L * t]);
+    }
+  }
+  return pts;
+}
+
+function makeSegmentFromPending() {
+  const ccw = $('arcOrientation').value === 'ccw';
+  const p = state.pending;
+  const tool = $('tool').value;
+  if (tool === 'line' && p.length >= 2) return {type:'line', start:p[0], end:p[1]};
+  if (tool === 'circle' && p.length >= 2) return {type:'circle', center:p[0], start:p[1], ccw};
+  if (tool === 'arc' && p.length >= 3) return {type:'arc', center:p[0], start:p[1], end:p[2], ccw};
+  if (tool === 'quadratic' && p.length >= 3) return {type:'quadratic', start:p[0], control:p[1], end:p[2]};
+  if (tool === 'cubic' && p.length >= 4) return {type:'cubic', start:p[0], control1:p[1], control2:p[2], end:p[3]};
+  if (tool === 'ray' && p.length >= 2) return {type:'ray', start:p[0], through:p[1]};
+  if (tool === 'freeform' && p.length >= 2) return {type:'polyline', points:[...p]};
+  return null;
+}
+
+function requiredClicks(tool) {
+  return ({line:2, circle:2, arc:3, quadratic:3, cubic:4, ray:2, freeform:Infinity})[tool];
+}
+
+function updateIntegrationHints() {
+  const tool = $('tool').value;
+  const p = state.pending.length;
+  const map = {
+    line: 'Click start, then end.',
+    circle: 'Click the center, then a point on the circle. Use the orientation selector for clockwise vs counterclockwise.',
+    arc: 'Click center, then the start point, then the end point. The end point is projected to the chosen circle radius.',
+    quadratic: 'Click start, control point, then end.',
+    cubic: 'Click start, control 1, control 2, then end.',
+    freeform: 'Click points along the path, then press “Finish freeform”.',
+    ray: 'Click the ray start, then a second point for its direction. It will continue to infinity.',
+  };
+  $('integrationInstructions').textContent = `${map[tool]} Pending points: ${p}.`;
+  $('pathSummary').textContent = summarizePathLocal();
+  $('integrationInfo').textContent = isClosedLocal(state.path)
+    ? 'Closed contour detected. Residue / Cauchy shortcuts may be used when the expression is in the app’s conservative theorem-safe class.'
+    : 'Open path. Numerical line integration will be used.';
+  renderPathEditor();
+  updateButtonStates();
+}
+
+function summarizePathLocal() {
+  if (!state.path.length) return 'Empty path.';
+  const counts = {};
+  for (const seg of state.path) counts[seg.type] = (counts[seg.type] || 0) + 1;
+  const pieces = Object.entries(counts).map(([k,v]) => `${v} ${k}${v === 1 ? '' : 's'}`);
+  return `${isClosedLocal(state.path) ? 'closed' : 'open'} path with ${pieces.join(', ')}.`;
+}
+
+function pathPointFields(seg) {
+  if (seg.type === 'line') return ['start', 'end'];
+  if (seg.type === 'circle') return ['center', 'start'];
+  if (seg.type === 'arc') return ['center', 'start', 'end'];
+  if (seg.type === 'quadratic') return ['start', 'control', 'end'];
+  if (seg.type === 'cubic') return ['start', 'control1', 'control2', 'end'];
+  if (seg.type === 'ray') return ['start', 'through'];
+  return [];
+}
+
+function pathPointValue(seg, field, index=null) {
+  if (seg.type === 'polyline') return seg.points[index];
+  return seg[field];
+}
+
+function setPathPointValue(segIndex, field, index, axis, value) {
+  const seg = state.path[segIndex];
+  if (!seg) return;
+  const point = seg.type === 'polyline' ? seg.points[index] : seg[field];
+  if (!Array.isArray(point)) return;
+  point[axis === 'x' ? 0 : 1] = value;
+}
+
+function renderPathEditor() {
+  const wrap = $('pathTableWrap');
+  if (!state.path.length) {
+    wrap.innerHTML = '<div class="mini" style="padding:0.75rem;">No committed path segments yet. Click the plot or load an example to begin.</div>';
+    return;
+  }
+
+  const rows = [];
+  rows.push('<table class="path-table"><thead><tr><th>#</th><th>Type</th><th>Part</th><th>x</th><th>y</th><th>Options</th><th>Actions</th></tr></thead><tbody>');
+  state.path.forEach((seg, segIndex) => {
+    const fields = seg.type === 'polyline' ? seg.points.map((_p, i) => `point ${i + 1}`) : pathPointFields(seg);
+    fields.forEach((field, rowIndex) => {
+      const point = seg.type === 'polyline' ? pathPointValue(seg, 'points', rowIndex) : pathPointValue(seg, field);
+      const optionCell = rowIndex === 0 ? segmentOptionHtml(seg, segIndex) : '';
+      const actionCell = [
+        rowIndex === 0 ? `<button type="button" data-action="delete-segment" data-seg="${segIndex}">Delete segment</button>` : '',
+        seg.type === 'polyline' ? `<button type="button" data-action="delete-poly-point" data-seg="${segIndex}" data-point="${rowIndex}">Delete point</button>` : '',
+        seg.type === 'polyline' && rowIndex === fields.length - 1 ? `<button type="button" data-action="add-poly-point" data-seg="${segIndex}">Add point</button>` : '',
+      ].filter(Boolean).join(' ');
+      rows.push(`
+        <tr>
+          <td>${segIndex + 1}</td>
+          <td>${escapeHtml(seg.type)}</td>
+          <td>${escapeHtml(field)}</td>
+          <td><input type="text" inputmode="decimal" value="${formatInputNumber(point?.[0])}" data-action="edit-point" data-seg="${segIndex}" data-field="${escapeHtml(field)}" data-point="${rowIndex}" data-axis="x"></td>
+          <td><input type="text" inputmode="decimal" value="${formatInputNumber(point?.[1])}" data-action="edit-point" data-seg="${segIndex}" data-field="${escapeHtml(field)}" data-point="${rowIndex}" data-axis="y"></td>
+          <td>${optionCell}</td>
+          <td>${actionCell}</td>
+        </tr>
+      `);
+    });
+  });
+  rows.push('</tbody></table>');
+  wrap.innerHTML = rows.join('');
+}
+
+function segmentOptionHtml(seg, segIndex) {
+  if (seg.type !== 'circle' && seg.type !== 'arc') return '';
+  return `
+    <select data-action="edit-orientation" data-seg="${segIndex}">
+      <option value="ccw" ${seg.ccw ? 'selected' : ''}>counterclockwise</option>
+      <option value="cw" ${seg.ccw ? '' : 'selected'}>clockwise</option>
+    </select>
+  `;
+}
+
+function onPathEditorChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+  const action = target.dataset.action;
+  const segIndex = Number(target.dataset.seg);
+  if (!Number.isInteger(segIndex) || !state.path[segIndex]) return;
+
+  if (action === 'edit-point') {
+    const raw = target.value.trim();
+    const value = parseNumericText(raw);
+    if (!Number.isFinite(value)) {
+      setStatus('Path coordinate must be finite.', 'error');
+      renderPathEditor();
+      return;
+    }
+    const seg = state.path[segIndex];
+    const field = seg.type === 'polyline' ? 'points' : target.dataset.field;
+    const pointIndex = Number(target.dataset.point);
+    setPathPointValue(segIndex, field, pointIndex, target.dataset.axis, value);
+  } else if (action === 'edit-orientation') {
+    state.path[segIndex].ccw = target.value === 'ccw';
+  }
+
+  clearIntegrationResult();
+  renderIntegrationPreview();
+}
+
+function onPathEditorClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement)) return;
+  const action = target.dataset.action;
+  const segIndex = Number(target.dataset.seg);
+  if (!Number.isInteger(segIndex) || !state.path[segIndex]) return;
+
+  if (action === 'delete-segment') {
+    state.path.splice(segIndex, 1);
+  } else if (action === 'delete-poly-point') {
+    const pointIndex = Number(target.dataset.point);
+    const seg = state.path[segIndex];
+    if (seg.type === 'polyline' && seg.points.length > 2) {
+      seg.points.splice(pointIndex, 1);
+    } else {
+      setStatus('Polyline segments need at least two points.', 'warning');
+      return;
+    }
+  } else if (action === 'add-poly-point') {
+    const seg = state.path[segIndex];
+    if (seg.type === 'polyline') {
+      const last = seg.points[seg.points.length - 1];
+      seg.points.push([last[0], last[1]]);
+    }
+  }
+
+  clearIntegrationResult();
+  renderIntegrationPreview();
+}
+
+function maybeCommitSegment() {
+  const tool = $('tool').value;
+  const req = requiredClicks(tool);
+  if (state.pending.length >= req && Number.isFinite(req)) {
+    const seg = makeSegmentFromPending();
+    if (seg) {
+      const problem = segmentProblem(seg);
+      if (problem) {
+        setStatus(problem, 'error');
+        return;
+      }
+      state.path.push(seg);
+      state.pending = [];
+      clearIntegrationResult();
+    }
+  }
+}
+
+function finishPendingSegment() {
+  if ($('tool').value !== 'freeform') return;
+  const seg = makeSegmentFromPending();
+  if (seg) {
+    const problem = segmentProblem(seg);
+    if (problem) {
+      setStatus(problem, 'error');
+      return;
+    }
+    state.path.push(seg);
+    state.pending = [];
+    clearIntegrationResult();
+    renderIntegrationPreview();
+  }
+}
+
+function undoPathThing() {
+  if (state.pending.length) state.pending.pop();
+  else if (state.path.length) state.path.pop();
+  clearIntegrationResult();
+  renderIntegrationPreview();
+}
+
+function closeLoopLocally() {
+  if (state.pending.length) return;
+  const a = pathStart(state.path);
+  const b = pathEnd(state.path);
+  if (!a || !b) return;
+  if (dist(a,b) < 1e-9) return;
+  state.path.push({type:'line', start:b, end:a});
+  clearIntegrationResult();
+  renderIntegrationPreview();
+}
+
+function segmentProblem(seg) {
+  const eps = 1e-9;
+  if (seg.type === 'line' && dist(seg.start, seg.end) <= eps) return 'Line segment is too short.';
+  if (seg.type === 'circle' && dist(seg.center, seg.start) <= eps) return 'Circle radius is too small.';
+  if (seg.type === 'arc' && (dist(seg.center, seg.start) <= eps || dist(seg.center, seg.end) <= eps)) return 'Arc radius is too small.';
+  if (seg.type === 'ray' && dist(seg.start, seg.through) <= eps) return 'Ray direction point must differ from the start.';
+  if (seg.type === 'polyline' && seg.points.length < 2) return 'Freeform path needs at least two points.';
+  return '';
+}
+
+function snapPoint(point) {
+  const tool = $('tool').value;
+  const placingCenter = (tool === 'circle' || tool === 'arc') && state.pending.length === 0;
+  if (placingCenter) return point;
+
+  const candidates = [];
+  const start = pathStart(state.path);
+  const end = pathEnd(state.path);
+  if (start) candidates.push(start);
+  if (end) candidates.push(end);
+  if (state.pending.length) candidates.push(state.pending[0]);
+
+  const b = boundsForLayout();
+  const tolerance = 0.012 * Math.max(b.xmax - b.xmin, b.ymax - b.ymin);
+  let best = null;
+  let bestDistance = Infinity;
+  for (const candidate of candidates) {
+    const d = dist(point, candidate);
+    if (d < bestDistance) {
+      best = candidate;
+      bestDistance = d;
+    }
+  }
+  return best && bestDistance <= tolerance ? [...best] : point;
+}
+
+function addPointToPending(point) {
+  state.pending.push(snapPoint(point));
+  maybeCommitSegment();
+  renderIntegrationPreview();
+}
+
+function ensurePlotHandler() {
+  if (state.plotBound) return;
+  const plot = $('plot');
+  plot.addEventListener('pointerdown', onPlotPointerDown, true);
+  plot.addEventListener('pointermove', onPlotPointerMove, true);
+  plot.addEventListener('pointerup', onPlotPointerUp);
+  plot.addEventListener('pointercancel', onPlotPointerEnd);
+  plot.addEventListener('pointerleave', onPlotPointerEnd);
+  plot.on('plotly_relayout', onPlotRelayout);
+  state.plotBound = true;
+}
+
+function onPlotPointerDown(event) {
+  if (event.target instanceof Element && event.target.closest('.modebar')) {
+    state.pointerStart = null;
+    return;
+  }
+  const point = pointFromPlotEvent(event);
+  if (!point) {
+    state.pointerStart = null;
+    event.stopPropagation();
+    return;
+  }
+  state.activePointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
+  if (state.activePointers.size >= 2) {
+    beginPinchGesture();
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  state.pointerStart = {x: event.clientX, y: event.clientY};
+}
+
+function onPlotPointerUp(event) {
+  const wasPinching = Boolean(state.pinchGesture);
+  state.activePointers.delete(event.pointerId);
+  if (wasPinching) {
+    if (state.activePointers.size < 2) endPinchGesture();
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  if (state.suppressNextClick) {
+    state.pointerStart = null;
+    return;
+  }
+  if (event.target instanceof Element && event.target.closest('.modebar')) return;
+  const moved = state.pointerStart
+    ? Math.hypot(event.clientX - state.pointerStart.x, event.clientY - state.pointerStart.y)
+    : 0;
+  if (!state.pointerStart) return;
+  state.pointerStart = null;
+  if (moved > 5) return;
+  const point = pointFromPlotEvent(event);
+  if (!point) return;
+  if (modeIsIntegration()) addPointToPending(point);
+  else requestProbe(point, {immediate: true, source: 'click'});
+}
+
+function onPlotPointerMove(event) {
+  if (state.activePointers.has(event.pointerId)) {
+    state.activePointers.set(event.pointerId, {x: event.clientX, y: event.clientY});
+  }
+  if (state.pinchGesture) {
+    updatePinchGesture();
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
+  if (modeIsIntegration()) return;
+  if (event.target instanceof Element && event.target.closest('.modebar')) return;
+  const point = pointFromPlotEvent(event);
+  if (!point) return;
+  scheduleProbe(point);
+}
+
+function onPlotPointerEnd(event) {
+  state.activePointers.delete(event.pointerId);
+  state.pointerStart = null;
+  if (state.activePointers.size < 2) endPinchGesture();
+}
+
+function pointerList() {
+  return [...state.activePointers.values()];
+}
+
+function pinchDistance(points) {
+  return Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+}
+
+function pinchCenter(points) {
+  return {
+    clientX: 0.5 * (points[0].x + points[1].x),
+    clientY: 0.5 * (points[0].y + points[1].y),
+  };
+}
+
+function beginPinchGesture() {
+  const points = pointerList();
+  if (points.length < 2) return;
+  const centerPoint = pointFromClientCoords(pinchCenter(points));
+  const bounds = getPlotVisibleBounds();
+  const distance = pinchDistance(points);
+  if (!centerPoint || !bounds || distance <= 8) return;
+  state.pinchGesture = {
+    startDistance: distance,
+    center: centerPoint,
+    startBounds: bounds,
+  };
+  state.pointerStart = null;
+  state.suppressNextClick = true;
+}
+
+function updatePinchGesture() {
+  if (state.pinchFrame) return;
+  state.pinchFrame = window.requestAnimationFrame(() => {
+    state.pinchFrame = null;
+    const gesture = state.pinchGesture;
+    const points = pointerList();
+    if (!gesture || points.length < 2) return;
+    const distance = pinchDistance(points);
+    if (distance <= 8) return;
+    const rawScale = gesture.startDistance / distance;
+    const scale = Math.max(0.08, Math.min(12, rawScale));
+    const c = gesture.center;
+    const b = gesture.startBounds;
+    const next = {
+      xmin: c[0] + (b.xmin - c[0]) * scale,
+      xmax: c[0] + (b.xmax - c[0]) * scale,
+      ymin: c[1] + (b.ymin - c[1]) * scale,
+      ymax: c[1] + (b.ymax - c[1]) * scale,
+    };
+    if (!boundsAreValid(next)) return;
+    Plotly.relayout('plot', {
+      'xaxis.range': [next.xmin, next.xmax],
+      'yaxis.range': [next.ymin, next.ymax],
+    });
+  });
+}
+
+function endPinchGesture() {
+  if (state.pinchFrame) {
+    window.cancelAnimationFrame(state.pinchFrame);
+    state.pinchFrame = null;
+  }
+  if (state.pinchGesture) {
+    const bounds = getPlotVisibleBounds();
+    if (bounds) {
+      state.viewportBounds = bounds;
+      setInputBounds(bounds);
+    }
+  }
+  state.pinchGesture = null;
+  state.pointerStart = null;
+  window.setTimeout(() => { state.suppressNextClick = false; }, 120);
+}
+
+function onPlotRelayout(_eventData) {
+  if (state.suppressRelayoutSync) return;
+  const bounds = getPlotVisibleBounds();
+  if (!bounds) return;
+  state.viewportBounds = bounds;
+  setInputBounds(bounds);
+  if (modeIsIntegration()) {
+    state.integrationBackdrop = null;
+    requestIntegrationBackdrop(bounds);
+  }
+}
+
+function pointFromPlotEvent(event) {
+  return pointFromClientCoords({clientX: event.clientX, clientY: event.clientY});
+}
+
+function pointFromClientCoords(coords) {
+  const gd = $('plot');
+  const layout = gd._fullLayout;
+  if (!layout || !layout._size || !layout.xaxis || !layout.yaxis) return null;
+  const rect = gd.getBoundingClientRect();
+  const xaxis = layout.xaxis;
+  const yaxis = layout.yaxis;
+  const xOffset = Number.isFinite(xaxis._offset) ? xaxis._offset : layout._size.l;
+  const yOffset = Number.isFinite(yaxis._offset) ? yaxis._offset : layout._size.t;
+  const xLength = Number.isFinite(xaxis._length) ? xaxis._length : layout._size.w;
+  const yLength = Number.isFinite(yaxis._length) ? yaxis._length : layout._size.h;
+  const px = coords.clientX - rect.left - xOffset;
+  const py = coords.clientY - rect.top - yOffset;
+  if (px < 0 || py < 0 || px > xLength || py > yLength) return null;
+  const xr = xaxis.range.map(Number);
+  const yr = yaxis.range.map(Number);
+  const x = typeof xaxis.p2l === 'function' ? xaxis.p2l(px) : xr[0] + (px / xLength) * (xr[1] - xr[0]);
+  const y = typeof yaxis.p2l === 'function' ? yaxis.p2l(py) : yr[1] - (py / yLength) * (yr[1] - yr[0]);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+  return complexPoint(x, y);
+}
+
+function scheduleProbe(point) {
+  state.lastProbePoint = point;
+  window.clearTimeout(state.probeTimer);
+  state.probeTimer = window.setTimeout(() => {
+    if (state.lastProbePoint) requestProbe(state.lastProbePoint, {source: 'hover'});
+  }, 90);
+}
+
+async function requestProbe(point, options={}) {
+  if (modeIsIntegration()) return;
+  if (state.probeController) state.probeController.abort();
+  state.probeController = new AbortController();
+  if (options.immediate) {
+    window.clearTimeout(state.probeTimer);
+    state.lastProbePoint = point;
+  }
+  try {
+    const resp = await fetch('/api/evaluate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({expr: $('expr').value, x: point[0], y: point[1]}),
+      signal: state.probeController.signal,
+    });
+    const data = await readJsonResponse(resp);
+    if (!resp.ok) {
+      renderProbeError(data.error || 'Probe failed.');
+      return;
+    }
+    renderProbe(data, options.source || 'hover');
+  } catch (err) {
+    if (err.name !== 'AbortError') renderProbeError(err.message || 'Probe failed.');
+  }
+}
+
+function renderProbe(data, source) {
+  const label = source === 'click' ? 'Clicked' : 'Hover';
+  const z = data.z || [NaN, NaN];
+  const bits = [`<strong>${label}</strong>`, `<span>z = ${formatComplexPair(z)}</span>`];
+  if (data.finite) {
+    bits.push(`<span>f(z) = ${formatComplexPair(data.value)}</span>`);
+    bits.push(`<span>|f(z)| = ${formatNumber(data.abs)}</span>`);
+    bits.push(`<span>arg = ${formatNumber(data.arg)}</span>`);
+  } else {
+    bits.push('<span>f(z) is non-finite here</span>');
+  }
+  $('probe').innerHTML = bits.join('');
+}
+
+function renderProbeError(message) {
+  $('probe').innerHTML = `<strong>Probe</strong><span>${escapeHtml(message)}</span>`;
+}
+
+function scheduleClassification(options={}) {
+  window.clearTimeout(state.classifyTimer);
+  const delay = options.immediate ? 0 : 180;
+  state.classifyTimer = window.setTimeout(requestClassification, delay);
+}
+
+async function requestClassification() {
+  if (state.classifyController) state.classifyController.abort();
+  state.classifyController = new AbortController();
+  try {
+    const resp = await fetch('/api/classify', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({expr: $('expr').value}),
+      signal: state.classifyController.signal,
+    });
+    const data = await readJsonResponse(resp);
+    if (!resp.ok) {
+      renderClassification({label: 'invalid expression', reasons: [data.error || 'Could not classify expression.']});
+      return;
+    }
+    renderClassification(data);
+  } catch (err) {
+    if (err.name !== 'AbortError') {
+      renderClassification({label: 'classification unavailable', reasons: [err.message || 'Could not classify expression.']});
+    }
+  }
+}
+
+function renderClassification(data) {
+  const reason = Array.isArray(data.reasons) && data.reasons.length ? data.reasons[0] : '';
+  $('functionBadge').dataset.reason = reason;
+  $('functionBadge').innerHTML = [
+    '<strong>Class</strong>',
+    `<span>${escapeHtml(data.label || 'unknown')}</span>`,
+    reason ? '<button type="button" class="why-button" data-action="toggle-class-reason">Why</button>' : '',
+  ].join('');
+  $('classReason').textContent = reason;
+  $('classReason').classList.add('hidden');
+}
+
+function onClassBadgeClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement) || target.dataset.action !== 'toggle-class-reason') return;
+  const reason = $('functionBadge').dataset.reason || '';
+  if (!reason) return;
+  $('classReason').textContent = reason;
+  $('classReason').classList.toggle('hidden');
+}
+
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[ch]);
+}
+
+function baseLayout(title, options={}) {
+  const b = options.bounds || boundsForLayout();
+  const integration = options.integration ?? modeIsIntegration();
+  return {
+    paper_bgcolor: 'rgba(8, 18, 19, 0)',
+    plot_bgcolor: '#0b1516',
+    font: {color: '#edf7f3', family: 'IBM Plex Sans, Avenir Next, sans-serif'},
+    xaxis: {
+      title: {text: 'Re(z)'},
+      scaleanchor: 'y',
+      scaleratio: 1,
+      constrain: 'domain',
+      showgrid: true,
+      gridcolor: 'rgba(160,205,198,0.15)',
+      zeroline: true,
+      zerolinecolor: 'rgba(243,199,107,0.5)',
+      range: [b.xmin, b.xmax],
+    },
+    yaxis: {
+      title: {text: 'Im(z)'},
+      showgrid: true,
+      gridcolor: 'rgba(160,205,198,0.15)',
+      zeroline: true,
+      zerolinecolor: 'rgba(243,199,107,0.5)',
+      range: [b.ymin, b.ymax],
+    },
+    margin: {l: 58, r: 24, t: 46, b: 52},
+    showlegend: true,
+    legend: {orientation: 'h', y: 1.02, x: 1, xanchor: 'right', bgcolor: 'rgba(8,18,19,0.72)'},
+    title: {text: title, font: {size: 16}},
+    hovermode: 'closest',
+    dragmode: integration ? false : 'pan',
+  };
+}
+
+function domainImageLayer(dataUri, bounds, opacity=1) {
+  return {
+    source: dataUri,
+    xref: 'x',
+    yref: 'y',
+    x: bounds.xmin,
+    y: bounds.ymax,
+    sizex: bounds.xmax - bounds.xmin,
+    sizey: bounds.ymax - bounds.ymin,
+    xanchor: 'left',
+    yanchor: 'top',
+    sizing: 'stretch',
+    opacity,
+    layer: 'below',
+  };
+}
+
+function plotPayload(bounds, modeOverride=null, resolutionOverride=null) {
+  const mode = modeOverride || $('mode').value;
+  return {
+    expr: $('expr').value,
+    mode,
+    xmin: bounds.xmin,
+    xmax: bounds.xmax,
+    ymin: bounds.ymin,
+    ymax: bounds.ymax,
+    n: resolutionOverride || readNumericInput('n'),
+    stride: mode === 'vectors' ? readNumericInput('stride') : 18,
+    frames: mode === 'transform' ? readNumericInput('frames') : 28,
+    vector_cap: mode === 'vectors' ? readNumericInput('vectorCap') : 0.72,
+    grid_lines: mode === 'transform' ? readNumericInput('gridLines') : 9,
+    grid_samples: mode === 'transform' ? readNumericInput('gridSamples') : 120,
+    highlight_zeros: $('highlightZeros').checked,
+  };
+}
+
+function integrationBackdropKey(bounds) {
+  const n = Math.min(420, Math.max(160, readNumericInput('n') || 300));
+  return JSON.stringify([
+    $('expr').value,
+    formatInputNumber(bounds.xmin),
+    formatInputNumber(bounds.xmax),
+    formatInputNumber(bounds.ymin),
+    formatInputNumber(bounds.ymax),
+    n,
+    $('highlightZeros').checked,
+  ]);
+}
+
+async function requestIntegrationBackdrop(bounds) {
+  if (!modeIsIntegration() || !boundsAreValid(bounds)) return;
+  const resolution = Math.min(420, Math.max(160, readNumericInput('n') || 300));
+  const key = integrationBackdropKey(bounds);
+  if (state.integrationBackdrop && state.integrationBackdrop.key === key) return;
+  if (state.backdropController) state.backdropController.abort();
+  state.backdropController = new AbortController();
+  try {
+    const resp = await fetch('/api/plot', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(plotPayload(bounds, 'colors', resolution)),
+      signal: state.backdropController.signal,
+    });
+    const data = await readJsonResponse(resp);
+    if (!resp.ok || data.kind !== 'image') return;
+    if (!modeIsIntegration() || key !== integrationBackdropKey(bounds)) return;
+    state.integrationBackdrop = {
+      key,
+      bounds,
+      dataUri: data.data_uri,
+      zeroTraces: data.zero_traces || [],
+      message: data.message || '',
+    };
+    renderIntegrationPreview({refreshBackdrop:false, preserveStatus:true});
+  } catch (err) {
+    if (err.name !== 'AbortError') state.integrationBackdrop = null;
+  }
+}
+
+function integrationBackdropImages(bounds) {
+  if (!state.integrationBackdrop || state.integrationBackdrop.key !== integrationBackdropKey(bounds)) return [];
+  return [domainImageLayer(state.integrationBackdrop.dataUri, bounds, 0.44)];
+}
+
+function integrationBackdropZeroTraces(bounds) {
+  if (!state.integrationBackdrop || state.integrationBackdrop.key !== integrationBackdropKey(bounds)) return [];
+  return state.integrationBackdrop.zeroTraces || [];
+}
+
+function buildLocalIntegrationTraces() {
+  const traces = [];
+  if (state.path.length) {
+    let xs = [], ys = [];
+    for (const seg of state.path) {
+      const pts = sampleSegment(seg, seg.type === 'polyline' ? Math.max(seg.points.length, 2) : 130);
+      xs.push(...pts.map(p => p[0]), null);
+      ys.push(...pts.map(p => p[1]), null);
+    }
+    traces.push({type:'scatter', mode:'lines', x:xs, y:ys, line:{width:3, color:'#78e0cf'}, name:'Path', hoverinfo:'skip'});
+  }
+  const s = pathStart(state.path), e = pathEnd(state.path);
+  if (s) traces.push({type:'scatter', mode:'markers', x:[s[0]], y:[s[1]], marker:{size:11, symbol:'circle', color:'#9cf0bd', line:{color:'#08201d', width:1}}, name:'Start'});
+  if (e) traces.push({type:'scatter', mode:'markers', x:[e[0]], y:[e[1]], marker:{size:11, symbol:'diamond', color:'#f3c76b', line:{color:'#241806', width:1}}, name:'End'});
+  if (state.pending.length) traces.push({type:'scatter', mode:'markers+lines', x:state.pending.map(p => p[0]), y:state.pending.map(p => p[1]), marker:{size:8, color:'#f3c76b'}, line:{dash:'dot', color:'#f3c76b'}, name:'Pending'});
+  if (state.serverIntegration && state.serverIntegration.residues && state.serverIntegration.residues.length) {
+    traces.push({
+      type:'scatter', mode:'markers+text',
+      x: state.serverIntegration.residues.map(r => r.point[0]),
+      y: state.serverIntegration.residues.map(r => r.point[1]),
+      text: state.serverIntegration.residues.map(r => `Res=${formatComplexPair(r.residue)}`),
+      textposition:'top center', marker:{size:12, symbol:'x', color:'#ff8f8f'}, name:'Residues', hoverinfo:'skip'
+    });
+  }
+  return traces;
+}
+
+function trimNumberString(text) {
+  return text
+    .replace(/(\.\d*?[1-9])0+(e|$)/, '$1$2')
+    .replace(/\.0+(e|$)/, '$1')
+    .replace(/\.(e|$)/, '$1');
+}
+
+function formatNumber(value, digits=8) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return String(value);
+  if (Math.abs(n) < 1e-12) return '0';
+  const abs = Math.abs(n);
+  const raw = abs >= 1e5 || abs < 1e-4 ? n.toExponential(6) : n.toPrecision(digits);
+  return trimNumberString(raw);
+}
+
+function formatComplexPair(pair) {
+  if (!Array.isArray(pair) || pair.length < 2) return 'undefined';
+  const re = Number(pair[0]), im = Number(pair[1]);
+  if (!Number.isFinite(re) || !Number.isFinite(im)) return 'non-finite';
+  const rs = formatNumber(re);
+  const is = formatNumber(Math.abs(im));
+  return `${rs}${im >= 0 ? '+' : '-'}${is}i`;
+}
+
+function formatComponentWithLabel(value, labelInfo) {
+  const base = formatNumber(value);
+  const label = labelInfo && labelInfo.label;
+  return label ? `${base} (${label})` : base;
+}
+
+function formatComplexPairWithLabels(pair, labels) {
+  if (!Array.isArray(pair) || pair.length < 2) return formatComplexPair(pair);
+  const re = Number(pair[0]), im = Number(pair[1]);
+  if (!Number.isFinite(re) || !Number.isFinite(im)) return formatComplexPair(pair);
+  const reText = formatComponentWithLabel(re, labels && labels.re);
+  const imText = formatComponentWithLabel(Math.abs(im), labels && labels.im);
+  return `${reText}${im >= 0 ? '+' : '-'}${imText}i`;
+}
+
+function updateButtonStates() {
+  const tool = $('tool').value;
+  $('finishSegmentBtn').disabled = tool !== 'freeform' || state.pending.length < 2;
+  $('undoBtn').disabled = !state.pending.length && !state.path.length;
+  $('closeLoopBtn').disabled = !!state.pending.length || !pathStart(state.path) || !pathEnd(state.path) || isClosedLocal(state.path);
+  $('reversePathBtn').disabled = !!state.pending.length || !state.path.length;
+  $('clearPathBtn').disabled = !state.pending.length && !state.path.length;
+}
+
+function renderIntegrationPreview(options={}) {
+  const bounds = ensureValidBounds();
+  if (!bounds) {
+    updateIntegrationHints();
+    return false;
+  }
+  preparePlot('integration');
+  $('plot').style.display = 'block';
+  const traces = buildLocalIntegrationTraces();
+  traces.unshift(...integrationBackdropZeroTraces(bounds));
+  const layout = baseLayout('Integration path editor', {bounds, integration:true});
+  layout.images = integrationBackdropImages(bounds);
+  Plotly.react('plot', traces, layout, PLOTLY_CONFIG);
+  ensurePlotHandler();
+  updateIntegrationHints();
+  if (options.refreshBackdrop !== false) requestIntegrationBackdrop(bounds);
+  return true;
+}
+
+function preparePlot(kind) {
+  state.lastRenderedKind = kind;
+}
+
+async function readJsonResponse(resp) {
+  const text = await resp.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (_err) {
+    return {error: text || resp.statusText};
+  }
+}
+
+async function renderPlot(options={}) {
+  cancelAutoRender();
+  const bounds = activeRenderBounds(options);
+  const mode = $('mode').value;
+  const n = mode === 'transform' ? 350 : readBoundedInteger('n', 100, 800, 'Resolution');
+  const stride = mode === 'vectors' ? readBoundedInteger('stride', 6, 80, 'Vector stride') : 18;
+  const frames = mode === 'transform' ? readBoundedInteger('frames', 10, 120, 'Animation frames') : 28;
+  const vectorCap = mode === 'vectors' ? readBoundedFloat('vectorCap', 0.15, 2.5, 'Vector cap') : 0.72;
+  const gridLines = mode === 'transform' ? readBoundedInteger('gridLines', 3, 41, 'Grid lines') : 9;
+  const gridSamples = mode === 'transform' ? readBoundedInteger('gridSamples', 20, 500, 'Samples / line') : 120;
+  if (!bounds || n === null || stride === null || frames === null || vectorCap === null || gridLines === null || gridSamples === null) return;
+
+  if (state.currentController) state.currentController.abort();
+  state.currentController = new AbortController();
+  const mySerial = ++state.requestSerial;
+  const payload = {
+    expr: $('expr').value,
+    mode,
+    xmin: bounds.xmin,
+    xmax: bounds.xmax,
+    ymin: bounds.ymin,
+    ymax: bounds.ymax,
+    n,
+    stride,
+    frames,
+    vector_cap: vectorCap,
+    grid_lines: gridLines,
+    grid_samples: gridSamples,
+    highlight_zeros: $('highlightZeros').checked,
+  };
+
+  setStatus('Rendering...', 'info');
+  setBusy(true, 'Rendering...');
+  try {
+    const resp = await fetch('/api/plot', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+      signal: state.currentController.signal,
+    });
+    const data = await readJsonResponse(resp);
+    if (mySerial !== state.requestSerial) return;
+    if (!resp.ok) { setStatus(data.error || 'Something went wrong.', 'error'); return; }
+    setStatus(data.message || '', data.status === 'warning' ? 'warning' : 'success');
+    if (data.kind === 'image') {
+      await renderDomainImage(data);
+      return;
+    }
+
+    preparePlot(data.kind);
+    $('plot').style.display = 'block';
+    const layout = baseLayout(data.title, {bounds: rangesToBounds(data.xrange, data.yrange), integration:false});
+    layout.showlegend = false;
+
+    if (data.kind === 'vectors') {
+      await Plotly.react('plot', data.traces, layout, PLOTLY_CONFIG);
+      ensurePlotHandler();
+      return;
+    }
+    if (data.kind === 'transform') {
+      layout.updatemenus = [{
+        type: 'buttons', x: 0.0, y: 1.12, showactive: false,
+        buttons: [
+          {label: 'Play', method: 'animate', args: [null, {fromcurrent: true, frame: {duration: 55, redraw: true}, transition: {duration: 0}}]},
+          {label: 'Pause', method: 'animate', args: [[null], {mode: 'immediate', frame: {duration: 0, redraw: false}, transition: {duration: 0}}]},
+        ]
+      }];
+      layout.sliders = [{ currentvalue: {prefix: 't = '}, steps: data.frames.map((f) => ({ label: f.name, method: 'animate', args: [[f.name], {mode: 'immediate', frame: {duration: 0, redraw: true}, transition: {duration: 0}}] })) }];
+      await Plotly.newPlot('plot', data.traces, layout, PLOTLY_CONFIG);
+      await Plotly.addFrames('plot', data.frames);
+      ensurePlotHandler();
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    setStatus(err.message || 'Something went wrong.', 'error');
+  } finally {
+    if (mySerial === state.requestSerial) {
+      setBusy(false);
+      scheduleAutoRenderAfterCompletion(1000);
+    }
+  }
+}
+
+async function renderDomainImage(data) {
+  preparePlot('image');
+  $('plot').style.display = 'block';
+  const bounds = rangesToBounds(data.xrange, data.yrange);
+  const layout = baseLayout(data.title || 'Domain coloring', {bounds, integration:false});
+  layout.showlegend = false;
+  layout.hovermode = 'closest';
+  layout.images = [domainImageLayer(data.data_uri, bounds, 1)];
+  await Plotly.react('plot', data.zero_traces || [], layout, PLOTLY_CONFIG);
+  ensurePlotHandler();
+}
+
+function renderIntegrationResult(data) {
+  state.serverIntegration = data;
+  setStatus(data.message || '', data.status === 'warning' ? 'warning' : 'success');
+  const traces = buildLocalIntegrationTraces();
+  const bounds = rangesToBounds(data.xrange, data.yrange);
+  const layout = baseLayout(data.title || 'Contour / path integral', {bounds, integration: true});
+  layout.images = integrationBackdropImages(bounds);
+  Plotly.react('plot', traces, layout, PLOTLY_CONFIG);
+  ensurePlotHandler();
+
+  const lines = [];
+  lines.push(`method     : ${data.method}`);
+  lines.push(`value      : ${formatComplexPairWithLabels(data.value, data.value_labels)}`);
+  lines.push(`abs error  : ${formatNumber(data.abs_error)}`);
+  lines.push(`status     : ${data.status}`);
+  lines.push(`path       : ${data.summary}`);
+  if (data.notes && data.notes.length) {
+    lines.push('notes      :');
+    for (const note of data.notes) lines.push(`  - ${note}`);
+  }
+  if (data.warnings && data.warnings.length) {
+    lines.push('warnings   :');
+    for (const w of data.warnings) lines.push(`  - ${w}`);
+  }
+  if (data.residues && data.residues.length) {
+    lines.push('residues   :');
+    for (const item of data.residues) {
+      const pointText = formatComplexPairWithLabels(item.point, item.point_labels);
+      const residueText = formatComplexPairWithLabels(item.residue, item.residue_labels);
+      lines.push(`  - at ${pointText}, winding ${item.winding}, residue ${residueText}`);
+    }
+  }
+  $('integrationResult').textContent = lines.join('\n');
+  updateButtonStates();
+}
+
+async function runIntegration() {
+  if ($('tool').value === 'freeform' && state.pending.length >= 2) finishPendingSegment();
+  const bounds = activeRenderBounds();
+  if (!bounds) return;
+  if (!state.path.length) {
+    setStatus('Draw a path first.', 'error');
+    return;
+  }
+  if (state.pending.length) {
+    setStatus('Finish the current incomplete segment first.', 'warning');
+    return;
+  }
+  if (state.integrationController) state.integrationController.abort();
+  state.integrationController = new AbortController();
+  const mySerial = ++state.integrationSerial;
+  setStatus('Integrating...', 'info');
+  setBusy(true, 'Integrating...');
+  const payload = {
+    expr: $('expr').value,
+    path: state.path,
+    bounds,
+    use_theorem: $('useTheorem').value === 'yes',
+  };
+
+  try {
+    const resp = await fetch('/api/integrate', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+      signal: state.integrationController.signal,
+    });
+    const data = await readJsonResponse(resp);
+    if (mySerial !== state.integrationSerial) return;
+    if (!resp.ok) { setStatus(data.error || 'Integration failed.', 'error'); return; }
+    renderIntegrationResult(data);
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    setStatus(err.message || 'Integration failed.', 'error');
+  } finally {
+    if (mySerial === state.integrationSerial) setBusy(false);
+  }
+}
+
+function loadIntegrationExample(name) {
+  state.pending = [];
+  clearIntegrationResult();
+  state.viewportBounds = null;
+  state.integrationBackdrop = null;
+  if (name === 'circle_residue') {
+    $('expr').value = '1/z';
+    $('xmin').value = -2; $('xmax').value = 2; $('ymin').value = -2; $('ymax').value = 2;
+    state.path = [{type:'circle', center:[0,0], start:[1,0], ccw:true}];
+  } else if (name === 'circle_two_poles') {
+    $('expr').value = 'exp(z)/(z^2+1)';
+    $('xmin').value = -3; $('xmax').value = 3; $('ymin').value = -3; $('ymax').value = 3;
+    state.path = [{type:'circle', center:[0,0], start:[2,0], ccw:true}];
+  } else if (name === 'ray_infinite') {
+    $('expr').value = '1/(1+z^2)';
+    $('xmin').value = -1; $('xmax').value = 6; $('ymin').value = -2; $('ymax').value = 2;
+    state.path = [{type:'ray', start:[0,0], through:[1,0]}];
+  }
+  scheduleClassification({immediate: true});
+  renderIntegrationPreview();
+}
+
+function onModeChange() {
+  const integration = modeIsIntegration();
+  const leavingIntegration = state.currentMode === 'integration' && !integration;
+  state.currentMode = $('mode').value;
+  if (state.currentController) state.currentController.abort();
+  if (state.integrationController) state.integrationController.abort();
+  state.requestSerial++;
+  state.integrationSerial++;
+  setBusy(false);
+  updateModeControls();
+  if (integration) cancelAutoRender();
+  if (leavingIntegration) clearPathState();
+  $('integrationPanel').classList.toggle('hidden', !integration);
+  $('integrationExamples').classList.toggle('hidden', !integration);
+  $('plotExamples').classList.toggle('hidden', integration);
+  if (integration) {
+    if (renderIntegrationPreview() !== false) {
+      setStatus('Click in the plot to build a path. Escape clears pending points; Backspace undoes.', 'info');
+    }
+  } else {
+    clearIntegrationResult();
+    renderPlot();
+  }
+}
+
+scheduleClassification({immediate: true});
+onModeChange();
+</script>
+</body>
+</html>
