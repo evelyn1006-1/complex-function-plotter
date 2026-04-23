@@ -1,45 +1,91 @@
 # Complex Function Plotter
 
-A small Flask app for visualizing and integrating complex functions.
+A Flask app for visualizing and integrating complex functions.
+
+**Live instance:** [complex.princessevelyn.com](https://complex.princessevelyn.com)
 
 ## Features
 
 ### Plotting modes
-- **Colors**: domain coloring
-- **Vectors**: sampled points `z` connected to `f(z)`
-- **Transformation**: an input grid smoothly interpolating to its image under `f`
+
+- **Colors** — domain coloring: hue = argument, brightness varies with magnitude. Non-finite values are shown in pale blue.
+- **Vectors** — sampled points `z` connected to `f(z)` with capped arrows; color encodes displacement length.
+- **Transformation** — an input grid smoothly interpolating to its image under `f`, animated with Play/Pause.
+
+All plot modes support scroll/pan zoom, pinch-to-zoom on touch devices, and a hover/click probe that evaluates `f(z)` at the cursor position.
 
 ### Integration mode
-- click-built paths using:
-  - line segments
-  - full circles
-  - circular arcs
-  - quadratic Bézier curves
-  - cubic Bézier curves
-  - freeform polylines
-  - rays to infinity
-- reverse orientation and close loops easily
-- server-side contour integration
-- conservative theorem shortcutting:
-  - Cauchy shortcut for a conservative entire-function class
-  - residue theorem for closed contours when the expression is in the app's conservative theorem-safe class and enclosed isolated singularities are found
-  - residues may be estimated numerically from small circles around singularities
-- if a detected singularity lies on the path, the app reports the integral as undefined for ordinary contour integration mode
+
+Click inside the plot to build a path from:
+- line segments
+- full circles
+- circular arcs
+- quadratic Bézier curves
+- cubic Bézier curves
+- freeform polylines
+- rays to infinity
+
+After drawing, the app computes the contour integral numerically. For closed contours, it can automatically apply theorem shortcuts when the expression is in the app's conservative theorem-safe class:
+- **Cauchy shortcut** for proven entire functions
+- **Residue theorem** for closed contours enclosing isolated singularities, with numerically estimated residues from small circles
+
+If a detected singularity lies on the path, the integral is reported as undefined for ordinary contour integration mode.
+
+### Expression classification
+
+As you type, the app classifies the expression in real time:
+- **entire** — built from `z`, constants, and functions in the conservative entire-function class
+- **holomorphic / analytic** — no branch cuts, denominators, or non-holomorphic operations detected
+- **holomorphic on a branch domain** — uses branch-cut functions
+- **meromorphic** — has denominators or known pole families
+- **non-holomorphic** — uses `conj`, `real`, `imag`, `abs`, etc.
+- **piecewise analytic** — uses `where` or `piecewise`
+
+Click the **Why** button next to the class badge to see the reasoning, including whether a numerical Cauchy-Riemann check passed.
+
+### Zero highlighting
+
+Toggle **Highlight zeros** to numerically detect roots of `f(z) = 0` and mark them on Colors and Vectors plots.
+
+### Auto re-render
+
+Toggle **Auto re-render** to automatically resample the plot using the current viewport bounds after panning or zooming.
 
 ## Run
 
+### Development
+
 ```bash
-python3.12 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python app.py
 ```
 
-Then open the local Flask address that prints in the terminal.
+Then open the local Flask address printed in the terminal.
+
+You will need a `.env` file with at least:
+
+```
+FLASK_SECRET_KEY=your-secret-key-here
+```
+
+### Production
+
+The repo includes deployment configs for nginx + gunicorn + systemd:
+
+- [`gunicorn.conf.py`](gunicorn.conf.py) — gunicorn settings
+- [`deploy/complex.service`](deploy/complex.service) — systemd service
+- [`deploy/complex.princessevelyn.com`](deploy/complex.princessevelyn.com) — nginx site config
+- [`deploy/deploy.sh`](deploy/deploy.sh) — deploy script
 
 ## Expression syntax
 
 Use Python-style expressions in `z`.
+
+- `^` is accepted as shorthand for `**`
+- Implicit multiplication is supported: `2z`, `z sin(z)`
+- Logical comparisons work inside `where` and `piecewise`: `(x >= -1) & (x <= 1)`
 
 Examples:
 - `z^2`
@@ -51,8 +97,6 @@ Examples:
 - `gamma(z)`
 - `erf(z)`
 - `zeta(z)`
-
-`^` is accepted as shorthand for `**`.
 
 ## Supported names
 
@@ -100,3 +144,7 @@ Examples:
 - Branch cuts and non-analytic expressions fall back to direct numerical path integration.
 - Principal value integrals are **not** implemented automatically.
 - Rays to infinity are supported, but divergent or conditionally convergent cases may still produce warnings or non-finite results.
+- Bound inputs accept decimal numbers and fractions like `1/2` or `-3/4`.
+
+Love you always and forever!~
+	- Princess Evelyn 🧡
