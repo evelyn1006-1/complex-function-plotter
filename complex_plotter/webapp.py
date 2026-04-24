@@ -191,6 +191,7 @@ def plot():
             bounded_int(data, "grid_lines", 9, 3, 41),
             bounded_int(data, "grid_samples", 120, 20, 500),
             bool(data.get("highlight_zeros", False)),
+            bool(data.get("show_singularities", False)),
         )
         return jsonify(result)
     except Exception as exc:
@@ -222,7 +223,7 @@ def evaluate_point():
 def classify():
     try:
         data = json_payload()
-        return jsonify(classify_expression(str(data.get("expr", "z"))))
+        return jsonify(classify_expression(str(data.get("expr", "z")), deep=bool(data.get("deep", False))))
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 

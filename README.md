@@ -43,17 +43,27 @@ If a detected singularity lies on the path, the integral is reported as undefine
 
 As you type, the app classifies the expression in real time:
 - **entire** — built from `z`, constants, and functions in the conservative entire-function class
-- **holomorphic / analytic** — no branch cuts, denominators, or non-holomorphic operations detected
+- **entire after symbolic simplification** — deep mode simplified away detected branch or singular behavior
+- **locally holomorphic / analytic** — component expressions that pass a Cauchy-Riemann check
+- **probably holomorphic (unclassified singularities)** — no obvious issues detected, but not in the conservative entire class
 - **holomorphic on a branch domain** — uses branch-cut functions
 - **meromorphic** — has denominators or known pole families
+- **meromorphic with removable singularities** — deep mode found only removable symbolic singularities
+- **holomorphic except at isolated singularities** — has detected isolated non-meromorphic singular behavior, such as a pole inside `exp`
+- **special-function analytic status uncertain** — uses special functions in a way the fast classifier does not try to prove
+- **undefined / singular everywhere** — deep mode found a denominator that simplifies to zero identically
 - **non-holomorphic** — uses `conj`, `real`, `imag`, `abs`, etc.
 - **piecewise analytic** — uses `where` or `piecewise`
 
-Click the **Why** button next to the class badge to see the reasoning, including whether a numerical Cauchy-Riemann check passed.
+Click the **Why** button next to the class badge to see the reasoning and singularity notes. Click **Deep** to request a slower SymPy-backed pass.
 
 ### Zero highlighting
 
 Toggle **Highlight zeros** to numerically detect roots of `f(z) = 0` and mark them on Colors and Vectors plots.
+
+### Singularity highlighting
+
+Toggle **Show singularities** to overlay classified singularity markers when the app can locate them in the current viewport. Pole, removable, essential-candidate, and branch-point labels use distinct marker styles.
 
 ### Auto re-render
 

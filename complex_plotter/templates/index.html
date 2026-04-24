@@ -316,6 +316,7 @@
       font-size: 0.84rem;
       line-height: 1.4;
       text-align: right;
+      white-space: pre-line;
     }
     .mode-hidden { display: none !important; }
     .path-table-wrap {
@@ -513,6 +514,10 @@
       <input id="highlightZeros" type="checkbox">
       Highlight zeros
     </label>
+    <label class="plot-toggle mode-control" data-modes="colors vectors integration" for="showSingularities">
+      <input id="showSingularities" type="checkbox">
+      Show singularities
+    </label>
     <label class="plot-toggle mode-control" data-modes="colors vectors" for="autoRender">
       <input id="autoRender" type="checkbox">
       Auto re-render
@@ -609,6 +614,11 @@ $('finishSegmentBtn').addEventListener('click', finishPendingSegment);
 $('clearPathBtn').addEventListener('click', () => { state.path = []; state.pending = []; clearIntegrationResult(); renderIntegrationPreview(); });
 $('autoRender').addEventListener('change', onAutoRenderChange);
 $('highlightZeros').addEventListener('change', () => {
+  state.integrationBackdrop = null;
+  if (modeIsIntegration()) renderIntegrationPreview();
+  else renderPlot();
+});
+$('showSingularities').addEventListener('change', () => {
   state.integrationBackdrop = null;
   if (modeIsIntegration()) renderIntegrationPreview();
   else renderPlot();
@@ -1489,14 +1499,16 @@ function scheduleClassification(options={}) {
   state.classifyTimer = window.setTimeout(requestClassification, delay);
 }
 
-async function requestClassification() {
+async function requestClassification(options={}) {
+  const deep = Boolean(options.deep);
   if (state.classifyController) state.classifyController.abort();
   state.classifyController = new AbortController();
   try {
+    if (deep) renderClassification({kind: 'classification', label: 'checking deeply...', reasons: ['Running a deeper symbolic classification pass.'], analysis_depth: 'deep'});
     const resp = await fetch('/api/classify', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({expr: $('expr').value}),
+      body: JSON.stringify({expr: $('expr').value, deep}),
       signal: state.classifyController.signal,
     });
     const data = await readJsonResponse(resp);
@@ -1514,19 +1526,35 @@ async function requestClassification() {
 
 function renderClassification(data) {
   const reason = Array.isArray(data.reasons) && data.reasons.length ? data.reasons[0] : '';
-  $('functionBadge').dataset.reason = reason;
+  const details = [];
+  const isClassification = data.kind === 'classification';
+  if (Array.isArray(data.reasons)) details.push(...data.reasons);
+  if (Array.isArray(data.singularities) && data.singularities.length) {
+    details.push('Singularity notes:');
+    for (const item of data.singularities) {
+      details.push(`- ${item.kind}: ${item.source} (${item.reason})`);
+    }
+  }
+  const detailText = details.join('\n');
+  $('functionBadge').dataset.reason = detailText;
   $('functionBadge').innerHTML = [
     '<strong>Class</strong>',
     `<span>${escapeHtml(data.label || 'unknown')}</span>`,
-    reason ? '<button type="button" class="why-button" data-action="toggle-class-reason">Why</button>' : '',
+    detailText ? '<button type="button" class="why-button" data-action="toggle-class-reason">Why</button>' : '',
+    isClassification && data.analysis_depth !== 'deep' ? '<button type="button" class="why-button" data-action="deep-classify">Deep</button>' : '',
   ].join('');
-  $('classReason').textContent = reason;
+  $('classReason').textContent = detailText;
   $('classReason').classList.add('hidden');
 }
 
 function onClassBadgeClick(event) {
   const target = event.target;
-  if (!(target instanceof HTMLButtonElement) || target.dataset.action !== 'toggle-class-reason') return;
+  if (!(target instanceof HTMLButtonElement)) return;
+  if (target.dataset.action === 'deep-classify') {
+    requestClassification({deep: true});
+    return;
+  }
+  if (target.dataset.action !== 'toggle-class-reason') return;
   const reason = $('functionBadge').dataset.reason || '';
   if (!reason) return;
   $('classReason').textContent = reason;
@@ -1611,6 +1639,7 @@ function plotPayload(bounds, modeOverride=null, resolutionOverride=null) {
     grid_lines: mode === 'transform' ? readNumericInput('gridLines') : 9,
     grid_samples: mode === 'transform' ? readNumericInput('gridSamples') : 120,
     highlight_zeros: $('highlightZeros').checked,
+    show_singularities: $('showSingularities').checked,
   };
 }
 
@@ -1624,6 +1653,7 @@ function integrationBackdropKey(bounds) {
     formatInputNumber(bounds.ymax),
     n,
     $('highlightZeros').checked,
+    $('showSingularities').checked,
   ]);
 }
 
@@ -1649,6 +1679,7 @@ async function requestIntegrationBackdrop(bounds) {
       bounds,
       dataUri: data.data_uri,
       zeroTraces: data.zero_traces || [],
+      singularityTraces: data.singularity_traces || [],
       message: data.message || '',
     };
     renderIntegrationPreview({refreshBackdrop:false, preserveStatus:true});
@@ -1665,6 +1696,11 @@ function integrationBackdropImages(bounds) {
 function integrationBackdropZeroTraces(bounds) {
   if (!state.integrationBackdrop || state.integrationBackdrop.key !== integrationBackdropKey(bounds)) return [];
   return state.integrationBackdrop.zeroTraces || [];
+}
+
+function integrationBackdropSingularityTraces(bounds) {
+  if (!state.integrationBackdrop || state.integrationBackdrop.key !== integrationBackdropKey(bounds)) return [];
+  return state.integrationBackdrop.singularityTraces || [];
 }
 
 function buildLocalIntegrationTraces() {
@@ -1753,6 +1789,7 @@ function renderIntegrationPreview(options={}) {
   $('plot').style.display = 'block';
   const traces = buildLocalIntegrationTraces();
   traces.unshift(...integrationBackdropZeroTraces(bounds));
+  traces.unshift(...integrationBackdropSingularityTraces(bounds));
   const layout = baseLayout('Integration path editor', {bounds, integration:true});
   layout.images = integrationBackdropImages(bounds);
   Plotly.react('plot', traces, layout, PLOTLY_CONFIG);
@@ -1805,6 +1842,7 @@ async function renderPlot(options={}) {
     grid_lines: gridLines,
     grid_samples: gridSamples,
     highlight_zeros: $('highlightZeros').checked,
+    show_singularities: $('showSingularities').checked,
   };
 
   setStatus('Rendering...', 'info');
@@ -1867,7 +1905,7 @@ async function renderDomainImage(data) {
   layout.showlegend = false;
   layout.hovermode = 'closest';
   layout.images = [domainImageLayer(data.data_uri, bounds, 1)];
-  await Plotly.react('plot', data.zero_traces || [], layout, PLOTLY_CONFIG);
+  await Plotly.react('plot', [...(data.zero_traces || []), ...(data.singularity_traces || [])], layout, PLOTLY_CONFIG);
   ensurePlotHandler();
 }
 
@@ -1920,6 +1958,8 @@ function renderIntegrationResult(data) {
   setStatus(data.message || '', data.status === 'warning' ? 'warning' : 'success');
   const traces = buildLocalIntegrationTraces();
   const bounds = rangesToBounds(data.xrange, data.yrange);
+  traces.unshift(...integrationBackdropZeroTraces(bounds));
+  traces.unshift(...integrationBackdropSingularityTraces(bounds));
   const layout = baseLayout(data.title || 'Contour / path integral', {bounds, integration: true});
   layout.images = integrationBackdropImages(bounds);
   Plotly.react('plot', traces, layout, PLOTLY_CONFIG);

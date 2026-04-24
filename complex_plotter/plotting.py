@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from scipy import optimize
 
-from .expressions import evaluate, evaluate_scalar
+from .expressions import evaluate, evaluate_scalar, singularity_points_in_bounds
 from .number_labels import complex_component_labels
 
 
@@ -263,6 +263,67 @@ def zero_marker_traces(expr: str, xmin: float, xmax: float, ymin: float, ymax: f
     }]
 
 
+SINGULARITY_STYLES: dict[str, dict[str, Any]] = {
+    "symbolic_pole": {"name": "poles", "label": "pole", "symbol": "x", "color": "#ff5d73", "size": 15},
+    "symbolic_pole_candidate": {"name": "pole candidates", "label": "pole?", "symbol": "x-open", "color": "#fb7185", "size": 15},
+    "symbolic_removable_singularity": {"name": "removable", "label": "rem", "symbol": "diamond-open", "color": "#7dd3fc", "size": 14},
+    "symbolic_essential_candidate": {"name": "essential", "label": "ess", "symbol": "star-diamond", "color": "#f59e0b", "size": 16},
+    "symbolic_branch_point_candidate": {"name": "branch points", "label": "branch", "symbol": "triangle-up", "color": "#c084fc", "size": 15},
+}
+DEFAULT_SINGULARITY_STYLE = {"name": "singularities", "label": "sing", "symbol": "cross", "color": "#f3c76b", "size": 14}
+
+
+def singularity_marker_traces(expr: str, xmin: float, xmax: float, ymin: float, ymax: float) -> list[dict[str, Any]]:
+    items = singularity_points_in_bounds(expr, (xmin, xmax, ymin, ymax))
+    if not items:
+        return []
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in items:
+        grouped.setdefault(str(item["kind"]), []).append(item)
+
+    traces: list[dict[str, Any]] = []
+    for kind, group in grouped.items():
+        style = SINGULARITY_STYLES.get(kind, DEFAULT_SINGULARITY_STYLE)
+        traces.append({
+            "type": "scatter",
+            "mode": "markers+text",
+            "x": [float(item["point"][0]) for item in group],
+            "y": [float(item["point"][1]) for item in group],
+            "text": [style["label"] for _item in group],
+            "textposition": "bottom center",
+            "customdata": [
+                [
+                    item.get("exact_point") or "",
+                    item.get("kind") or "",
+                    item.get("source") or "",
+                    item.get("reason") or "",
+                    item.get("pole_order") or "",
+                ]
+                for item in group
+            ],
+            "marker": {
+                "size": style["size"],
+                "symbol": style["symbol"],
+                "color": style["color"],
+                "opacity": 0.98,
+                "line": {"width": 2.4, "color": style["color"]},
+            },
+            "textfont": {"color": style["color"], "size": 11, "family": "IBM Plex Mono, monospace"},
+            "name": style["name"],
+            "hovertemplate": (
+                "singularity<br>"
+                "z = %{x:.12g}%{y:+.12g}i<br>"
+                "exact: %{customdata[0]}<br>"
+                "kind: %{customdata[1]}<br>"
+                "source: %{customdata[2]}<br>"
+                "order: %{customdata[4]}<br>"
+                "%{customdata[3]}<extra></extra>"
+            ),
+        })
+    return traces
+
+
 VECTOR_COLORS = ["#5f7cff", "#5aa9e6", "#78e0cf", "#9cf0bd", "#f3c76b", "#f59e5b", "#ff8f8f"]
 VECTOR_COLORSCALE = [[i / (len(VECTOR_COLORS) - 1), color] for i, color in enumerate(VECTOR_COLORS)]
 
@@ -509,6 +570,7 @@ def compute_plot_cached(
     grid_lines: int,
     grid_samples: int,
     highlight_zeros: bool,
+    show_singularities: bool,
 ) -> dict[str, Any]:
     if not all(math.isfinite(v) for v in (xmin, xmax, ymin, ymax)):
         raise ValueError("Bounds must be finite numbers")
@@ -539,6 +601,7 @@ def compute_plot_cached(
             "kind": "image",
             "data_uri": image_to_data_uri(img),
             "zero_traces": zero_marker_traces(expr, xmin, xmax, ymin, ymax, n) if highlight_zeros else [],
+            "singularity_traces": singularity_marker_traces(expr, xmin, xmax, ymin, ymax) if show_singularities else [],
             "xrange": [xmin, xmax],
             "yrange": [ymin, ymax],
             "title": "Domain coloring",
@@ -549,6 +612,8 @@ def compute_plot_cached(
         traces, xrange, yrange, capped_count = vector_segments(expr, xmin, xmax, ymin, ymax, stride, n, vector_cap)
         if highlight_zeros:
             traces.extend(zero_marker_traces(expr, xmin, xmax, ymin, ymax, n))
+        if show_singularities:
+            traces.extend(singularity_marker_traces(expr, xmin, xmax, ymin, ymax))
         message = "Arrows show z -> f(z), capped to keep the field readable; color encodes original displacement length."
         if capped_count:
             message += f" {capped_count} arrows were capped."
