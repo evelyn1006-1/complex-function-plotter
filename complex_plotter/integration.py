@@ -9,6 +9,7 @@ import numpy as np
 from scipy import integrate, optimize
 from scipy.integrate import IntegrationWarning
 
+from .exact_integration import attempt_exact_integral
 from .expressions import analyze_expression, evaluate, evaluate_scalar
 from .number_labels import complex_component_labels
 from .paths import (
@@ -401,9 +402,59 @@ def _plot_traces(path: list[dict[str, Any]], bounds: tuple[float, float, float, 
     return traces
 
 
-def integrate_path(expr: str, path: list[dict[str, Any]], bounds: tuple[float, float, float, float], use_theorem: bool = True) -> dict[str, Any]:
+def _integration_result(
+    *,
+    title: str,
+    message: str,
+    summary: str,
+    path: list[dict[str, Any]],
+    bounds: tuple[float, float, float, float],
+    method: str,
+    status: str,
+    value: complex,
+    abs_error: float,
+    warning_messages: list[str],
+    notes: list[str],
+    residue_markers: list[dict[str, Any]],
+    exact_value: str | None = None,
+    exact_latex: str | None = None,
+) -> dict[str, Any]:
+    result = {
+        "kind": "integration",
+        "title": title,
+        "message": message,
+        "summary": summary,
+        "closed": is_closed_path(path),
+        "method": method,
+        "status": status,
+        "value": [float(np.real(value)), float(np.imag(value))],
+        "value_labels": complex_component_labels(value),
+        "abs_error": float(abs_error),
+        "warnings": warning_messages,
+        "notes": notes,
+        "residues": residue_markers,
+        "traces": _plot_traces(path, bounds, residue_markers),
+        "xrange": [bounds[0], bounds[1]],
+        "yrange": [bounds[2], bounds[3]],
+    }
+    if exact_value is not None:
+        result["exact_value"] = exact_value
+    if exact_latex is not None:
+        result["exact_latex"] = exact_latex
+    return result
+
+
+def integrate_path(
+    expr: str,
+    path: list[dict[str, Any]],
+    bounds: tuple[float, float, float, float],
+    use_theorem: bool = True,
+    method_mode: str = "auto",
+) -> dict[str, Any]:
     if not path:
         raise ValueError("Draw a path first.")
+    if method_mode not in {"auto", "theorem", "numeric"}:
+        raise ValueError("Integration method must be auto, theorem, or numeric.")
 
     summary = path_summary(path)
     path_points = sample_path(path, bounds, points_per_segment=180)
@@ -420,6 +471,28 @@ def integrate_path(expr: str, path: list[dict[str, Any]], bounds: tuple[float, f
     if np.any(~np.isfinite(sampled_values)):
         raise ValueError("The integrand hits a non-finite value somewhere on the sampled path. The integral is undefined or needs a principal-value treatment, which this app does not do automatically.")
 
+    if method_mode == "auto":
+        exact = attempt_exact_integral(expr, path, bounds)
+        if exact is not None:
+            notes = exact["notes"]
+            residue_markers = exact["residues"]
+            return _integration_result(
+                title="Contour / path integral",
+                message=notes[0],
+                summary=summary,
+                path=path,
+                bounds=bounds,
+                method=exact["method"],
+                status="ok",
+                value=exact["value"],
+                abs_error=0.0,
+                warning_messages=[],
+                notes=notes,
+                residue_markers=residue_markers,
+                exact_value=exact["exact_value"],
+                exact_latex=exact.get("exact_latex"),
+            )
+
     total = 0j
     total_err = 0.0
     warning_messages: list[str] = []
@@ -431,7 +504,7 @@ def integrate_path(expr: str, path: list[dict[str, Any]], bounds: tuple[float, f
 
     method = "numerical"
     theorem = None
-    if use_theorem:
+    if use_theorem and method_mode in {"auto", "theorem"}:
         theorem = _attempt_theorem(expr, path, bounds, direct_value=total)
         if theorem is not None:
             method = theorem["method"]
@@ -446,21 +519,17 @@ def integrate_path(expr: str, path: list[dict[str, Any]], bounds: tuple[float, f
     theorem_notes = theorem["notes"] if theorem else []
     residue_markers = theorem["residues"] if theorem and theorem["method"] == "residue" else []
 
-    return {
-        "kind": "integration",
-        "title": "Contour / path integral",
-        "message": theorem_notes[0] if theorem_notes else ("Integrated numerically along the supplied parameterized path."),
-        "summary": summary,
-        "closed": is_closed_path(path),
-        "method": method,
-        "status": status,
-        "value": [float(np.real(total)), float(np.imag(total))],
-        "value_labels": complex_component_labels(total),
-        "abs_error": float(total_err),
-        "warnings": warning_messages,
-        "notes": theorem_notes,
-        "residues": residue_markers,
-        "traces": _plot_traces(path, bounds, residue_markers),
-        "xrange": [bounds[0], bounds[1]],
-        "yrange": [bounds[2], bounds[3]],
-    }
+    return _integration_result(
+        title="Contour / path integral",
+        message=theorem_notes[0] if theorem_notes else ("Integrated numerically along the supplied parameterized path."),
+        summary=summary,
+        path=path,
+        bounds=bounds,
+        method=method,
+        status=status,
+        value=total,
+        abs_error=total_err,
+        warning_messages=warning_messages,
+        notes=theorem_notes,
+        residue_markers=residue_markers,
+    )

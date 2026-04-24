@@ -8,6 +8,13 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,650&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script>
+    window.MathJax = {
+      tex: {inlineMath: [['\\(', '\\)'], ['$', '$']]},
+      options: {skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre']},
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
   <style>
     :root {
       color-scheme: dark;
@@ -172,6 +179,28 @@
       color: var(--text);
       font-family: "IBM Plex Mono", monospace;
       font-size: 0.92rem;
+      overflow-x: auto;
+    }
+    .exact-formula {
+      display: inline;
+      width: auto;
+      padding: 0.06rem 0.32rem;
+      border-radius: 7px;
+      border-color: rgba(243, 199, 107, 0.42);
+      background: rgba(243, 199, 107, 0.1);
+      color: var(--accent-2);
+      font: inherit;
+      font-weight: 600;
+      vertical-align: baseline;
+    }
+    .latex-render {
+      margin-top: 0.7rem;
+      padding: 0.65rem 0.8rem;
+      border: 1px solid rgba(243, 199, 107, 0.24);
+      border-radius: 12px;
+      background: rgba(5, 13, 14, 0.72);
+      color: var(--soft);
+      font-family: "IBM Plex Sans", sans-serif;
       overflow-x: auto;
     }
     .hidden { display: none; }
@@ -454,10 +483,11 @@
         </select>
       </div>
       <div>
-        <label for="useTheorem">Use theorem shortcut</label>
-        <select id="useTheorem">
-          <option value="yes">Yes, when safe</option>
-          <option value="no">Numerical only</option>
+        <label for="integrationMethod">Integration method</label>
+        <select id="integrationMethod">
+          <option value="auto">Exact first</option>
+          <option value="theorem">Theorem / numeric</option>
+          <option value="numeric">Numerical only</option>
         </select>
       </div>
       <div><label>&nbsp;</label><button id="undoBtn">Undo</button></div>
@@ -548,6 +578,7 @@ for (const btn of document.querySelectorAll('#integrationExamples button')) {
 $('pathTableWrap').addEventListener('change', onPathEditorChange);
 $('pathTableWrap').addEventListener('click', onPathEditorClick);
 $('functionBadge').addEventListener('click', onClassBadgeClick);
+$('integrationResult').addEventListener('click', onExactFormulaClick);
 
 $('plotBtn').addEventListener('click', () => {
   if ($('mode').value === 'integration') runIntegration();
@@ -570,7 +601,7 @@ $('expr').addEventListener('input', () => {
 $('mode').addEventListener('change', onModeChange);
 $('tool').addEventListener('change', () => { state.pending = []; updateIntegrationHints(); renderIntegrationPreview(); });
 $('arcOrientation').addEventListener('change', () => { clearIntegrationResult(); renderIntegrationPreview(); });
-$('useTheorem').addEventListener('change', clearIntegrationResult);
+$('integrationMethod').addEventListener('change', clearIntegrationResult);
 $('undoBtn').addEventListener('click', undoPathThing);
 $('closeLoopBtn').addEventListener('click', closeLoopLocally);
 $('reversePathBtn').addEventListener('click', () => { if (!state.pending.length) { state.path = reversePathLocal(state.path); clearIntegrationResult(); renderIntegrationPreview(); } });
@@ -805,6 +836,18 @@ function subP(a, b) { return [a[0] - b[0], a[1] - b[1]]; }
 function dist(a, b) { const dx = a[0] - b[0], dy = a[1] - b[1]; return Math.hypot(dx, dy); }
 function angleAround(center, p) { return Math.atan2(p[1] - center[1], p[0] - center[0]); }
 function interpolate(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]; }
+function projectArcEnd(center, start, end) {
+  const radius = dist(center, start);
+  const dx = end[0] - center[0], dy = end[1] - center[1];
+  const length = Math.hypot(dx, dy);
+  if (radius <= 1e-12 || length <= 1e-12) return null;
+  return [center[0] + radius * dx / length, center[1] + radius * dy / length];
+}
+function normalizeSegmentLocal(seg) {
+  if (seg.type !== 'arc') return seg;
+  const end = projectArcEnd(seg.center, seg.start, seg.end);
+  return end ? {...seg, end} : seg;
+}
 
 function pathStart(path) {
   if (!path.length) return null;
@@ -817,10 +860,7 @@ function pathEnd(path) {
   const seg = path[path.length - 1];
   if (seg.type === 'line') return seg.end;
   if (seg.type === 'arc') {
-    const c = seg.center, s = seg.start, e = seg.end;
-    const r = dist(c, s);
-    const th = angleAround(c, e);
-    return [c[0] + r * Math.cos(th), c[1] + r * Math.sin(th)];
+    return projectArcEnd(seg.center, seg.start, seg.end);
   }
   if (seg.type === 'circle') return seg.start;
   if (seg.type === 'quadratic' || seg.type === 'cubic') return seg.end;
@@ -837,7 +877,10 @@ function isClosedLocal(path) {
 
 function reverseSegmentLocal(seg) {
   if (seg.type === 'line') return {type:'line', start: seg.end, end: seg.start};
-  if (seg.type === 'arc') return {type:'arc', center: seg.center, start: pathEnd([seg]), end: seg.start, ccw: !seg.ccw};
+  if (seg.type === 'arc') {
+    const end = pathEnd([seg]);
+    return end ? normalizeSegmentLocal({type:'arc', center: seg.center, start: end, end: seg.start, ccw: !seg.ccw}) : seg;
+  }
   if (seg.type === 'circle') return {type:'circle', center: seg.center, start: seg.start, ccw: !seg.ccw};
   if (seg.type === 'quadratic') return {type:'quadratic', start: seg.end, control: seg.control, end: seg.start};
   if (seg.type === 'cubic') return {type:'cubic', start: seg.end, control1: seg.control2, control2: seg.control1, end: seg.start};
@@ -867,7 +910,8 @@ function sampleSegment(seg, n=120) {
       pts.push([c[0] + r * Math.cos(th), c[1] + r * Math.sin(th)]);
     }
   } else if (seg.type === 'arc') {
-    const c = seg.center, s = seg.start, e = seg.end;
+    const c = seg.center, s = seg.start, e = projectArcEnd(seg.center, seg.start, seg.end);
+    if (!e) return pts;
     const r = dist(c, s);
     let a0 = angleAround(c, s), a1 = angleAround(c, e);
     let delta;
@@ -930,7 +974,7 @@ function makeSegmentFromPending() {
   const tool = $('tool').value;
   if (tool === 'line' && p.length >= 2) return {type:'line', start:p[0], end:p[1]};
   if (tool === 'circle' && p.length >= 2) return {type:'circle', center:p[0], start:p[1], ccw};
-  if (tool === 'arc' && p.length >= 3) return {type:'arc', center:p[0], start:p[1], end:p[2], ccw};
+  if (tool === 'arc' && p.length >= 3) return normalizeSegmentLocal({type:'arc', center:p[0], start:p[1], end:p[2], ccw});
   if (tool === 'quadratic' && p.length >= 3) return {type:'quadratic', start:p[0], control:p[1], end:p[2]};
   if (tool === 'cubic' && p.length >= 4) return {type:'cubic', start:p[0], control1:p[1], control2:p[2], end:p[3]};
   if (tool === 'ray' && p.length >= 2) return {type:'ray', start:p[0], through:p[1]};
@@ -1059,6 +1103,7 @@ function onPathEditorChange(event) {
     const field = seg.type === 'polyline' ? 'points' : target.dataset.field;
     const pointIndex = Number(target.dataset.point);
     setPathPointValue(segIndex, field, pointIndex, target.dataset.axis, value);
+    if (seg.type === 'arc' && !segmentProblem(seg)) state.path[segIndex] = normalizeSegmentLocal(seg);
   } else if (action === 'edit-orientation') {
     state.path[segIndex].ccw = target.value === 'ccw';
   }
@@ -1826,6 +1871,50 @@ async function renderDomainImage(data) {
   ensurePlotHandler();
 }
 
+function appendResultText(container, text) {
+  container.appendChild(document.createTextNode(text));
+}
+
+function appendResultLine(container, text='') {
+  appendResultText(container, `${text}\n`);
+}
+
+function appendExactFormula(container, text, latex) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'exact-formula';
+  button.textContent = text;
+  button.dataset.latex = latex || text;
+  button.title = 'Click to render this formula';
+  container.appendChild(button);
+}
+
+function appendFormulaLine(container, label, text, latex) {
+  appendResultText(container, label);
+  appendExactFormula(container, text, latex);
+  appendResultText(container, '\n');
+}
+
+function addLatexPreview(container) {
+  const preview = document.createElement('div');
+  preview.id = 'latexPreview';
+  preview.className = 'latex-render hidden';
+  container.appendChild(preview);
+}
+
+function onExactFormulaClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLButtonElement) || !target.classList.contains('exact-formula')) return;
+  const preview = $('latexPreview');
+  if (!preview) return;
+  const latex = target.dataset.latex || target.textContent || '';
+  preview.textContent = `\\[${latex}\\]`;
+  preview.classList.remove('hidden');
+  if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
+    window.MathJax.typesetPromise([preview]).catch(() => {});
+  }
+}
+
 function renderIntegrationResult(data) {
   state.serverIntegration = data;
   setStatus(data.message || '', data.status === 'warning' ? 'warning' : 'success');
@@ -1836,29 +1925,48 @@ function renderIntegrationResult(data) {
   Plotly.react('plot', traces, layout, PLOTLY_CONFIG);
   ensurePlotHandler();
 
-  const lines = [];
-  lines.push(`method     : ${data.method}`);
-  lines.push(`value      : ${formatComplexPairWithLabels(data.value, data.value_labels)}`);
-  lines.push(`abs error  : ${formatNumber(data.abs_error)}`);
-  lines.push(`status     : ${data.status}`);
-  lines.push(`path       : ${data.summary}`);
+  const result = $('integrationResult');
+  result.textContent = '';
+  appendResultLine(result, `method     : ${data.method}`);
+  if (data.exact_value) appendFormulaLine(result, 'exact      : ', data.exact_value, data.exact_latex);
+  appendResultLine(result, `value      : ${formatComplexPairWithLabels(data.value, data.value_labels)}`);
+  appendResultLine(result, `abs error  : ${formatNumber(data.abs_error)}`);
+  appendResultLine(result, `status     : ${data.status}`);
+  appendResultLine(result, `path       : ${data.summary}`);
   if (data.notes && data.notes.length) {
-    lines.push('notes      :');
-    for (const note of data.notes) lines.push(`  - ${note}`);
+    appendResultLine(result, 'notes      :');
+    for (const note of data.notes) appendResultLine(result, `  - ${note}`);
   }
   if (data.warnings && data.warnings.length) {
-    lines.push('warnings   :');
-    for (const w of data.warnings) lines.push(`  - ${w}`);
+    appendResultLine(result, 'warnings   :');
+    for (const w of data.warnings) appendResultLine(result, `  - ${w}`);
   }
   if (data.residues && data.residues.length) {
-    lines.push('residues   :');
+    appendResultLine(result, 'residues   :');
     for (const item of data.residues) {
       const pointText = formatComplexPairWithLabels(item.point, item.point_labels);
       const residueText = formatComplexPairWithLabels(item.residue, item.residue_labels);
-      lines.push(`  - at ${pointText}, winding ${item.winding}, residue ${residueText}`);
+      appendResultText(result, `  - at ${pointText}, winding ${item.winding}, residue `);
+      if (item.exact_residue) {
+        appendExactFormula(result, item.exact_residue, item.exact_residue_latex);
+        appendResultText(result, ` (${residueText})\n`);
+      } else {
+        appendResultLine(result, residueText);
+      }
+      if (item.residue_note) appendResultLine(result, `      ${item.residue_note}`);
+      if (item.laurent_series) {
+        appendResultText(result, '      Laurent: ');
+        appendExactFormula(result, item.laurent_series, item.laurent_series_latex);
+        appendResultText(result, '\n');
+      }
+      if (item.denominator_series) {
+        appendResultText(result, `      denominator zero order ${item.denominator_zero_order}: `);
+        appendExactFormula(result, item.denominator_series, item.denominator_series_latex);
+        appendResultText(result, '\n');
+      }
     }
   }
-  $('integrationResult').textContent = lines.join('\n');
+  addLatexPreview(result);
   updateButtonStates();
 }
 
@@ -1883,7 +1991,8 @@ async function runIntegration() {
     expr: $('expr').value,
     path: state.path,
     bounds,
-    use_theorem: $('useTheorem').value === 'yes',
+    method: $('integrationMethod').value,
+    use_theorem: $('integrationMethod').value !== 'numeric',
   };
 
   try {

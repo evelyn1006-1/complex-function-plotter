@@ -13,6 +13,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from .expressions import classify_expression, evaluate_scalar
 from .integration import integrate_path
 from .number_parsing import parse_real
+from .paths import normalize_segment
 from .plotting import compute_plot_cached
 
 # ==========================
@@ -105,6 +106,7 @@ def path_from_payload(data: dict[str, Any]) -> list[dict[str, Any]]:
     if len(path) > 80:
         raise ValueError("Paths are limited to 80 segments.")
     allowed_types = {"line", "arc", "circle", "quadratic", "cubic", "polyline", "ray"}
+    normalized_path: list[dict[str, Any]] = []
     for segment in path:
         if not isinstance(segment, dict):
             raise ValueError("Each path segment must be an object.")
@@ -118,7 +120,8 @@ def path_from_payload(data: dict[str, Any]) -> list[dict[str, Any]]:
                 raise ValueError("Polyline points must be a list.")
             if len(points) > 3000:
                 raise ValueError("Freeform polylines are limited to 3000 points.")
-    return path
+        normalized_path.append(normalize_segment(segment))
+    return normalized_path
 
 
 # ==========================
@@ -237,6 +240,7 @@ def integrate():
             path_from_payload(data),
             bounds,
             bool(data.get("use_theorem", True)),
+            str(data.get("method", "auto")),
         )
         return jsonify(result)
     except Exception as exc:

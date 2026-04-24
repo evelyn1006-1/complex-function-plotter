@@ -22,6 +22,27 @@ def point_to_json(z: complex) -> list[float]:
     return [float(np.real(z)), float(np.imag(z))]
 
 
+def project_arc_end(center: complex, start: complex, end: complex) -> complex:
+    radius = abs(start - center)
+    direction = end - center
+    if radius < 1e-12:
+        raise ValueError("Arc radius cannot be zero")
+    if abs(direction) < 1e-12:
+        raise ValueError("Arc end point cannot equal the center")
+    return center + radius * direction / abs(direction)
+
+
+def normalize_segment(segment: dict[str, Any]) -> dict[str, Any]:
+    if segment.get("type") != "arc":
+        return segment
+    center = to_complex(segment["center"])
+    start = to_complex(segment["start"])
+    end = to_complex(segment["end"])
+    normalized = dict(segment)
+    normalized["end"] = point_to_json(project_arc_end(center, start, end))
+    return normalized
+
+
 def _angle(z: complex) -> float:
     return float(np.angle(z))
 
@@ -56,9 +77,7 @@ def segment_end(segment: dict[str, Any]) -> complex | None:
         center = to_complex(segment["center"])
         start = to_complex(segment["start"])
         end = to_complex(segment["end"])
-        radius = abs(start - center)
-        theta1 = _angle(end - center)
-        return center + radius * np.exp(1j * theta1)
+        return project_arc_end(center, start, end)
     if kind == "circle":
         return to_complex(segment["start"])
     if kind == "quadratic":
@@ -163,7 +182,7 @@ def _eval_line(segment: dict[str, Any], t: np.ndarray) -> tuple[np.ndarray, np.n
 def _eval_arc(segment: dict[str, Any], t: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     center = to_complex(segment["center"])
     start = to_complex(segment["start"])
-    end = to_complex(segment["end"])
+    end = project_arc_end(center, start, to_complex(segment["end"]))
     theta0 = _angle(start - center)
     theta1 = _angle(end - center)
     radius = abs(start - center)

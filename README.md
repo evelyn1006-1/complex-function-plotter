@@ -25,7 +25,15 @@ Click inside the plot to build a path from:
 - freeform polylines
 - rays to infinity
 
-After drawing, the app computes the contour integral numerically. For closed contours, it can automatically apply theorem shortcuts when the expression is in the app's conservative theorem-safe class:
+After drawing, the app computes the contour integral with **Exact first** mode by default. When the expression is simple enough, the app reports both an exact symbolic value and a decimal approximation. Exact formulas are clickable and render as LaTeX. You can also switch to theorem/numeric fallback mode or numerical-only mode.
+
+Exact mode currently handles:
+- **Closed contours** where SymPy can enumerate isolated meromorphic singularities in the plot bounds, including polynomial denominators and common Laurent-series cases like `1/sin(z)` or `1/(exp(z)-1)`. Individual enclosed residues are shown exactly too.
+- **Open contours** of conservatively recognized entire functions when SymPy finds an elementary antiderivative
+
+For exact residues, the result panel includes local observability such as pole order, Laurent expansion snippets, and denominator series when available.
+
+For closed contours, the app can also apply theorem shortcuts when the expression is in the app's conservative theorem-safe class:
 - **Cauchy shortcut** for proven entire functions
 - **Residue theorem** for closed contours enclosing isolated singularities, with numerically estimated residues from small circles
 
