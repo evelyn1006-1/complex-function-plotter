@@ -987,10 +987,17 @@ def classify_expression(expr: str, *, deep: bool = False) -> dict[str, Any]:
             label = "entire after symbolic simplification"
             reasons.append("Deep SymPy pass found no singularities after accounting for known nonzero special functions.")
 
+    mobius = None if features.has_undefined_denominator else mobius_analysis(features.expr)
+    visible_label = label
+    if mobius:
+        lft_label = "Möbius/LFT" if mobius["label"] == "linear fractional transformation" else f"{mobius['label']} Möbius/LFT"
+        visible_label = f"{lft_label} ({label})"
+
     return {
         "kind": "classification",
         "analysis_depth": "deep" if deep else "fast",
-        "label": label,
+        "label": visible_label,
+        "analytic_label": label,
         "expression": features.expr,
         "reasons": reasons,
         "flags": {
@@ -1004,12 +1011,113 @@ def classify_expression(expr: str, *, deep: bool = False) -> dict[str, Any]:
             "proven_entire": features.proven_entire,
             "cauchy_riemann_verified": bool(cr_check and cr_check["passes"]),
         },
+        "mobius": mobius,
         "singularities": singularities,
     }
 
 
 def _sympy_text(value: Any) -> str:
     return regex.sub(r"\bI\b", "i", sy.sstr(value))
+
+
+def _linear_coefficients(expr: sy.Expr) -> tuple[sy.Expr, sy.Expr] | None:
+    try:
+        poly = sy.Poly(expr, SYM_Z)
+    except Exception:
+        return None
+    if poly.degree() > 1:
+        return None
+    return sy.simplify(poly.coeff_monomial(SYM_Z)), sy.simplify(poly.coeff_monomial(1))
+
+
+def _sympy_expr_is_zero(expr: sy.Expr) -> bool:
+    try:
+        simplified = sy.simplify(expr)
+    except Exception:
+        simplified = expr
+    return bool(simplified == 0 or simplified.is_zero is True)
+
+
+def _mobius_kind(a: sy.Expr, b: sy.Expr, c: sy.Expr, d: sy.Expr, determinant: sy.Expr) -> str:
+    if _sympy_expr_is_zero(b) and _sympy_expr_is_zero(c) and _sympy_expr_is_zero(a - d):
+        return "identity"
+
+    trace = sy.simplify(a + d)
+    invariant = sy.simplify(trace**2 / determinant)
+    if _sympy_expr_is_zero(invariant - 4):
+        return "parabolic"
+
+    numeric = _complex_from_sympy(invariant)
+    if numeric is None:
+        return "linear fractional transformation"
+    if abs(numeric.imag) > 1e-9:
+        return "loxodromic"
+    value = numeric.real
+    if 0 <= value < 4:
+        return "elliptic"
+    if value > 4:
+        return "hyperbolic"
+    return "loxodromic"
+
+
+def _mobius_fixed_points(a: sy.Expr, b: sy.Expr, c: sy.Expr, d: sy.Expr) -> list[str]:
+    equation = sy.expand(c * SYM_Z**2 + (d - a) * SYM_Z - b)
+    if _sympy_expr_is_zero(equation):
+        return ["all points"]
+    try:
+        solutions = sy.solve(equation, SYM_Z)
+    except Exception:
+        return []
+    return [_sympy_text(sy.simplify(solution)) for solution in solutions[:4]]
+
+
+def mobius_analysis(expr: str) -> dict[str, Any] | None:
+    """Return a compact symbolic description when expr is a nonconstant LFT."""
+    sym_expr = _sympy_from_text(expr)
+    if sym_expr is None:
+        return None
+    try:
+        rational = sy.cancel(sy.together(sym_expr))
+        numerator, denominator = sy.fraction(rational)
+    except Exception:
+        return None
+
+    num_coeffs = _linear_coefficients(numerator)
+    den_coeffs = _linear_coefficients(denominator)
+    if num_coeffs is None or den_coeffs is None:
+        return None
+
+    a, b = num_coeffs
+    c, d = den_coeffs
+    determinant = sy.simplify(a * d - b * c)
+    if _sympy_expr_is_zero(determinant):
+        return None
+
+    pole = None
+    if not _sympy_expr_is_zero(c):
+        pole = _sympy_text(sy.simplify(-d / c))
+
+    zero = None
+    if not _sympy_expr_is_zero(a):
+        zero = _sympy_text(sy.simplify(-b / a))
+    elif not _sympy_expr_is_zero(b):
+        zero = "none"
+
+    trace = sy.simplify(a + d)
+    invariant = sy.simplify(trace**2 / determinant)
+    return {
+        "kind": "mobius",
+        "label": _mobius_kind(a, b, c, d, determinant),
+        "a": _sympy_text(a),
+        "b": _sympy_text(b),
+        "c": _sympy_text(c),
+        "d": _sympy_text(d),
+        "determinant": _sympy_text(determinant),
+        "trace_squared_over_determinant": _sympy_text(invariant),
+        "zero": zero,
+        "pole": pole,
+        "fixed_points": _mobius_fixed_points(a, b, c, d),
+    }
 
 
 def _sympy_has_branch_constructs(sym_expr: sy.Expr) -> bool:

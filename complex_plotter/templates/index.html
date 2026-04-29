@@ -427,6 +427,29 @@
       <label for="gridSamples">Samples / line</label>
       <input id="gridSamples" type="number" min="20" max="500" step="10" value="120">
     </div>
+    <div class="mode-control" data-modes="transform">
+      <label for="transformHighlight">Highlight curve</label>
+      <select id="transformHighlight">
+        <option value="none">None</option>
+        <option value="axes">Axes</option>
+        <option value="vertical">Vertical line</option>
+        <option value="horizontal">Horizontal line</option>
+        <option value="diagonal">Diagonal line</option>
+        <option value="circle">Circle</option>
+      </select>
+    </div>
+    <div class="mode-control curve-param" data-modes="transform" data-param="a">
+      <label id="transformHighlightALabel" for="transformHighlightA">Curve value</label>
+      <input id="transformHighlightA" type="text" inputmode="decimal" value="1">
+    </div>
+    <div class="mode-control curve-param" data-modes="transform" data-param="b">
+      <label id="transformHighlightBLabel" for="transformHighlightB">Offset</label>
+      <input id="transformHighlightB" type="text" inputmode="decimal" value="0">
+    </div>
+    <div class="mode-control curve-param" data-modes="transform" data-param="c">
+      <label id="transformHighlightCLabel" for="transformHighlightC">Radius</label>
+      <input id="transformHighlightC" type="text" inputmode="decimal" value="1">
+    </div>
     <div class="wide">
       <label>Viewport behavior</label>
       <div class="control-note">Pan or scroll-zoom the plot, then press Plot / Compute to resample the currently visible region.</div>
@@ -604,6 +627,7 @@ $('expr').addEventListener('input', () => {
   }
 });
 $('mode').addEventListener('change', onModeChange);
+$('transformHighlight').addEventListener('change', updateTransformCurveControls);
 $('tool').addEventListener('change', () => { state.pending = []; updateIntegrationHints(); renderIntegrationPreview(); });
 $('arcOrientation').addEventListener('change', () => { clearIntegrationResult(); renderIntegrationPreview(); });
 $('integrationMethod').addEventListener('change', clearIntegrationResult);
@@ -638,7 +662,7 @@ $('resetViewBtn').addEventListener('click', () => {
     renderIntegrationPreview();
   }
 }));
-['n','stride','frames','vectorCap','gridLines','gridSamples'].forEach(id => $(id).addEventListener('change', () => {
+['n','stride','frames','vectorCap','gridLines','gridSamples','transformHighlightA','transformHighlightB','transformHighlightC'].forEach(id => $(id).addEventListener('change', () => {
   if ($('mode').value === 'integration' && (id === 'n')) {
     state.integrationBackdrop = null;
     renderIntegrationPreview();
@@ -831,8 +855,47 @@ function updateModeControls() {
     const modes = el.dataset.modes.split(/\s+/);
     el.classList.toggle('mode-hidden', !modes.includes(mode));
   }
+  updateTransformCurveControls();
   $('probe').classList.toggle('mode-hidden', modeIsIntegration());
   if (!['colors', 'vectors'].includes(mode)) cancelAutoRender();
+}
+
+function updateTransformCurveControls() {
+  const kind = $('transformHighlight').value;
+  const active = transformCurveConfig(kind);
+  const labels = Object.fromEntries(active.map(item => [item.param, item.label]));
+  for (const el of document.querySelectorAll('.curve-param')) {
+    const param = el.dataset.param;
+    const visible = labels[param] && $('mode').value === 'transform';
+    el.classList.toggle('mode-hidden', !visible);
+    if (visible) {
+      const label = $(`transformHighlight${param.toUpperCase()}Label`);
+      if (label) label.textContent = labels[param];
+    }
+  }
+}
+
+function transformCurveConfig(kind=$('transformHighlight').value) {
+  const configs = {
+    none: [],
+    axes: [],
+    vertical: [{param: 'a', label: 'x'}],
+    horizontal: [{param: 'a', label: 'y'}],
+    diagonal: [{param: 'a', label: 'Slope'}, {param: 'b', label: 'Intercept'}],
+    circle: [{param: 'a', label: 'Center x'}, {param: 'b', label: 'Center y'}, {param: 'c', label: 'Radius'}],
+  };
+  return configs[kind] || [];
+}
+
+function readTransformCurveParams() {
+  const values = {a: 0, b: 0, c: 1, ok: true};
+  for (const item of transformCurveConfig()) {
+    const id = `transformHighlight${item.param.toUpperCase()}`;
+    const value = readBoundedFloat(id, -1000, 1000, item.label);
+    if (value === null) values.ok = false;
+    else values[item.param] = value;
+  }
+  return values;
 }
 
 function isTypingTarget(event) {
@@ -1528,12 +1591,25 @@ function renderClassification(data) {
   const reason = Array.isArray(data.reasons) && data.reasons.length ? data.reasons[0] : '';
   const details = [];
   const isClassification = data.kind === 'classification';
+  if (data.analytic_label && data.analytic_label !== data.label) details.push(`Analytic class: ${data.analytic_label}`);
   if (Array.isArray(data.reasons)) details.push(...data.reasons);
   if (Array.isArray(data.singularities) && data.singularities.length) {
     details.push('Singularity notes:');
     for (const item of data.singularities) {
       details.push(`- ${item.kind}: ${item.source} (${item.reason})`);
     }
+  }
+  if (data.mobius) {
+    const m = data.mobius;
+    const fixed = Array.isArray(m.fixed_points) && m.fixed_points.length ? m.fixed_points.join(', ') : 'none reported';
+    details.push('Möbius / LFT:');
+    details.push(`- type: ${m.label}`);
+    details.push(`- matrix: [[${m.a}, ${m.b}], [${m.c}, ${m.d}]]`);
+    details.push(`- determinant: ${m.determinant}`);
+    details.push(`- tr²/det: ${m.trace_squared_over_determinant}`);
+    details.push(`- zero: ${m.zero || 'none'}`);
+    details.push(`- pole: ${m.pole || 'none'}`);
+    details.push(`- fixed points: ${fixed}`);
   }
   const detailText = details.join('\n');
   $('functionBadge').dataset.reason = detailText;
@@ -1625,6 +1701,7 @@ function domainImageLayer(dataUri, bounds, opacity=1) {
 
 function plotPayload(bounds, modeOverride=null, resolutionOverride=null) {
   const mode = modeOverride || $('mode').value;
+  const curveParams = mode === 'transform' ? readTransformCurveParams() : {a: 0, b: 0, c: 1};
   return {
     expr: $('expr').value,
     mode,
@@ -1638,6 +1715,10 @@ function plotPayload(bounds, modeOverride=null, resolutionOverride=null) {
     vector_cap: mode === 'vectors' ? readNumericInput('vectorCap') : 0.72,
     grid_lines: mode === 'transform' ? readNumericInput('gridLines') : 9,
     grid_samples: mode === 'transform' ? readNumericInput('gridSamples') : 120,
+    transform_highlight: mode === 'transform' ? $('transformHighlight').value : 'none',
+    transform_highlight_a: curveParams.a,
+    transform_highlight_b: curveParams.b,
+    transform_highlight_c: curveParams.c,
     highlight_zeros: $('highlightZeros').checked,
     show_singularities: $('showSingularities').checked,
   };
@@ -1823,7 +1904,8 @@ async function renderPlot(options={}) {
   const vectorCap = mode === 'vectors' ? readBoundedFloat('vectorCap', 0.15, 2.5, 'Vector cap') : 0.72;
   const gridLines = mode === 'transform' ? readBoundedInteger('gridLines', 3, 41, 'Grid lines') : 9;
   const gridSamples = mode === 'transform' ? readBoundedInteger('gridSamples', 20, 500, 'Samples / line') : 120;
-  if (!bounds || n === null || stride === null || frames === null || vectorCap === null || gridLines === null || gridSamples === null) return;
+  const curveParams = mode === 'transform' ? readTransformCurveParams() : {a: 0, b: 0, c: 1, ok: true};
+  if (!bounds || n === null || stride === null || frames === null || vectorCap === null || gridLines === null || gridSamples === null || !curveParams.ok) return;
 
   if (state.currentController) state.currentController.abort();
   state.currentController = new AbortController();
@@ -1841,6 +1923,10 @@ async function renderPlot(options={}) {
     vector_cap: vectorCap,
     grid_lines: gridLines,
     grid_samples: gridSamples,
+    transform_highlight: mode === 'transform' ? $('transformHighlight').value : 'none',
+    transform_highlight_a: curveParams.a,
+    transform_highlight_b: curveParams.b,
+    transform_highlight_c: curveParams.c,
     highlight_zeros: $('highlightZeros').checked,
     show_singularities: $('showSingularities').checked,
   };

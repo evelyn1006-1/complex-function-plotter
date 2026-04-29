@@ -11,6 +11,9 @@ A Flask app for visualizing and integrating complex functions.
 - **Colors** — domain coloring: hue = argument, brightness varies with magnitude. Non-finite values are shown in pale blue.
 - **Vectors** — sampled points `z` connected to `f(z)` with capped arrows; color encodes displacement length.
 - **Transformation** — an input grid smoothly interpolating to its image under `f`, animated with Play/Pause.
+  Transformation mode can also highlight a chosen source curve, including axes, vertical lines,
+  horizontal lines, diagonal lines, or off-center circles, so its image can be tracked during the
+  homotopy.
 
 All plot modes support scroll/pan zoom, pinch-to-zoom on touch devices, and a hover/click probe that evaluates `f(z)` at the cursor position.
 
@@ -56,6 +59,11 @@ As you type, the app classifies the expression in real time:
 - **piecewise analytic** — uses `where` or `piecewise`
 
 Click the **Why** button next to the class badge to see the reasoning and singularity notes. Click **Deep** to request a slower SymPy-backed pass.
+
+When the expression simplifies to a nonconstant linear fractional transformation `(az+b)/(cz+d)`,
+the class badge identifies it as a Möbius/LFT directly. The reasoning panel also reports
+matrix coefficients, determinant, `tr²/det`, zero, pole, fixed points, and a conservative
+type label such as elliptic, parabolic, hyperbolic, loxodromic, or identity.
 
 ### Zero highlighting
 

@@ -1,6 +1,7 @@
 import unittest
 
-from complex_plotter.expressions import classify_expression, singularity_points_in_bounds
+from complex_plotter.expressions import classify_expression, mobius_analysis, singularity_points_in_bounds
+from complex_plotter.plotting import compute_plot_cached
 
 
 def classification_kinds(expr: str, *, deep: bool = True) -> list[str]:
@@ -33,7 +34,7 @@ class ClassificationTests(unittest.TestCase):
 
         for expr, deep, expected in cases:
             with self.subTest(expr=expr, deep=deep):
-                self.assertEqual(classify_expression(expr, deep=deep)["label"], expected)
+                self.assertEqual(classify_expression(expr, deep=deep)["analytic_label"], expected)
 
     def test_fast_constant_special_functions_are_not_active_pole_families(self) -> None:
         for expr in ("gamma(1)", "tan(1)", "zeta(2)"):
@@ -107,6 +108,101 @@ class ClassificationTests(unittest.TestCase):
             with self.subTest(expr=expr, point=point):
                 points = singularities_by_exact_point(expr)
                 self.assertEqual(points[point]["kind"], expected_kind)
+
+    def test_mobius_analysis_detects_lft_data(self) -> None:
+        result = mobius_analysis("(z+1)/(z-1)")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result["label"], "elliptic")
+        self.assertEqual(result["a"], "1")
+        self.assertEqual(result["b"], "1")
+        self.assertEqual(result["c"], "1")
+        self.assertEqual(result["d"], "-1")
+        self.assertEqual(result["determinant"], "-2")
+        self.assertEqual(result["zero"], "-1")
+        self.assertEqual(result["pole"], "1")
+        self.assertEqual(set(result["fixed_points"]), {"1 - sqrt(2)", "1 + sqrt(2)"})
+
+    def test_classification_includes_mobius_payload(self) -> None:
+        result = classify_expression("(z+1)/(z-1)", deep=True)
+
+        self.assertEqual(result["analytic_label"], "meromorphic")
+        self.assertEqual(result["label"], "elliptic Möbius/LFT (meromorphic)")
+        self.assertEqual(result["mobius"]["kind"], "mobius")
+        self.assertEqual(result["mobius"]["pole"], "1")
+
+    def test_transform_highlight_adds_animated_curve_trace(self) -> None:
+        result = compute_plot_cached(
+            "1/z",
+            "transform",
+            -2,
+            2,
+            -2,
+            2,
+            350,
+            18,
+            12,
+            0.72,
+            5,
+            40,
+            False,
+            False,
+            "circle",
+            0.0,
+            0.0,
+            1.0,
+        )
+
+        self.assertEqual(result["kind"], "transform")
+        self.assertEqual(len(result["traces"]), 2)
+        self.assertEqual(result["traces"][1]["name"], "|z| = 1")
+        self.assertEqual(len(result["frames"][0]["data"]), 2)
+
+    def test_transform_highlight_supports_diagonal_and_off_center_circle(self) -> None:
+        diagonal = compute_plot_cached(
+            "z^2",
+            "transform",
+            -2,
+            2,
+            -2,
+            2,
+            350,
+            18,
+            12,
+            0.72,
+            5,
+            40,
+            False,
+            False,
+            "diagonal",
+            -1.0,
+            0.5,
+            1.0,
+        )
+        circle = compute_plot_cached(
+            "z^2",
+            "transform",
+            -2,
+            2,
+            -2,
+            2,
+            350,
+            18,
+            12,
+            0.72,
+            5,
+            40,
+            False,
+            False,
+            "circle",
+            0.5,
+            -0.25,
+            0.75,
+        )
+
+        self.assertEqual(diagonal["traces"][1]["name"], "y = -1x +0.5")
+        self.assertEqual(circle["traces"][1]["name"], "|z - (0.5-0.25i)| = 0.75")
 
 
 if __name__ == "__main__":

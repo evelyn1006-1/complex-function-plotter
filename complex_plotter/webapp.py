@@ -192,6 +192,10 @@ def plot():
             bounded_int(data, "grid_samples", 120, 20, 500),
             bool(data.get("highlight_zeros", False)),
             bool(data.get("show_singularities", False)),
+            str(data.get("transform_highlight", "none")),
+            bounded_float(data, "transform_highlight_a", 0.0, -1000.0, 1000.0),
+            bounded_float(data, "transform_highlight_b", 0.0, -1000.0, 1000.0),
+            bounded_float(data, "transform_highlight_c", 1.0, -1000.0, 1000.0),
         )
         return jsonify(result)
     except Exception as exc:

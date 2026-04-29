@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from scipy import optimize
 
-from .expressions import evaluate, evaluate_scalar, singularity_points_in_bounds
+from .expressions import evaluate, evaluate_scalar, mobius_analysis, singularity_points_in_bounds
 from .number_labels import complex_component_labels
 
 
@@ -491,6 +491,84 @@ def make_line_segments(points: np.ndarray) -> tuple[list[float | None], list[flo
     return x, y
 
 
+HIGHLIGHT_CURVE_COLORS = ["#f3c76b", "#ff8f8f", "#7dd3fc"]
+
+
+def _highlight_curve_points(
+    kind: str,
+    a: float,
+    b: float,
+    c: float,
+    xmin: float,
+    xmax: float,
+    ymin: float,
+    ymax: float,
+    points_per_curve: int,
+) -> list[tuple[str, np.ndarray]]:
+    sample_count = max(60, points_per_curve)
+    if kind == "none":
+        return []
+    if kind == "vertical":
+        y_vals = np.linspace(ymin, ymax, sample_count)
+        return [(f"x = {a:.6g}", a + 1j * y_vals)]
+    if kind == "horizontal":
+        x_vals = np.linspace(xmin, xmax, sample_count)
+        return [(f"y = {a:.6g}", x_vals + 1j * a)]
+    if kind == "diagonal":
+        slope = a
+        intercept = b
+        points: list[tuple[float, float]] = []
+        for x in (xmin, xmax):
+            y = slope * x + intercept
+            if ymin <= y <= ymax:
+                points.append((x, y))
+        if abs(slope) > 1e-12:
+            for y in (ymin, ymax):
+                x = (y - intercept) / slope
+                if xmin <= x <= xmax:
+                    points.append((x, y))
+        unique_points: list[tuple[float, float]] = []
+        for point in points:
+            if not any(math.hypot(point[0] - existing[0], point[1] - existing[1]) < 1e-9 for existing in unique_points):
+                unique_points.append(point)
+        if len(unique_points) >= 2:
+            unique_points.sort(key=lambda point: (point[0], point[1]))
+            start, end = unique_points[0], unique_points[-1]
+            x_vals = np.linspace(start[0], end[0], sample_count)
+            y_vals = np.linspace(start[1], end[1], sample_count)
+        else:
+            x_vals = np.linspace(xmin, xmax, sample_count)
+            y_vals = slope * x_vals + intercept
+        return [(f"y = {slope:.6g}x {intercept:+.6g}", x_vals + 1j * y_vals)]
+    if kind == "circle":
+        center = complex(a, b)
+        radius = max(abs(c), 1e-9)
+        angles = np.linspace(0, 2 * math.pi, sample_count)
+        label = f"|z| = {radius:.6g}" if abs(center) < 1e-12 else f"|z - ({a:.6g}{b:+.6g}i)| = {radius:.6g}"
+        return [(label, center + radius * np.exp(1j * angles))]
+    if kind == "axes":
+        x_vals = np.linspace(xmin, xmax, sample_count)
+        y_vals = np.linspace(ymin, ymax, sample_count)
+        return [
+            ("real axis", x_vals + 0j),
+            ("imaginary axis", 1j * y_vals),
+        ]
+    return []
+
+
+def _line_trace(points: np.ndarray, *, name: str, color: str, width: float, hover: str = "skip") -> dict[str, Any]:
+    x, y = make_line_segments(np.asarray([points], dtype=np.complex128))
+    return {
+        "type": "scatter",
+        "mode": "lines",
+        "x": x,
+        "y": y,
+        "line": {"width": width, "color": color},
+        "name": name,
+        "hoverinfo": hover,
+    }
+
+
 def transform_frames(
     expr: str,
     xmin: float,
@@ -500,6 +578,10 @@ def transform_frames(
     frame_count: int,
     line_count: int,
     points_per_line: int,
+    highlight_kind: str = "none",
+    highlight_a: float = 0.0,
+    highlight_b: float = 0.0,
+    highlight_c: float = 1.0,
 ):
     xs = np.linspace(xmin, xmax, line_count)
     ys = np.linspace(ymin, ymax, line_count)
@@ -515,14 +597,27 @@ def transform_frames(
     z = np.array(lines, dtype=np.complex128)
     w = evaluate(expr, z)
     finite_w = np.isfinite(w)
+    highlight_curves = _highlight_curve_points(highlight_kind, highlight_a, highlight_b, highlight_c, xmin, xmax, ymin, ymax, points_per_line)
+    highlighted: list[tuple[str, np.ndarray, np.ndarray, np.ndarray]] = []
+    for name, curve_z in highlight_curves:
+        curve_w = evaluate(expr, curve_z)
+        highlighted.append((name, curve_z, curve_w, np.isfinite(curve_w)))
 
     if np.any(finite_w):
-        all_x = np.concatenate([np.real(z).ravel(), np.real(w[finite_w]).ravel()])
-        all_y = np.concatenate([np.imag(z).ravel(), np.imag(w[finite_w]).ravel()])
+        x_parts = [np.real(z).ravel(), np.real(w[finite_w]).ravel()]
+        y_parts = [np.imag(z).ravel(), np.imag(w[finite_w]).ravel()]
     else:
-        all_x = np.real(z).ravel()
-        all_y = np.imag(z).ravel()
+        x_parts = [np.real(z).ravel()]
+        y_parts = [np.imag(z).ravel()]
+    for _name, curve_z, curve_w, finite_curve_w in highlighted:
+        x_parts.append(np.real(curve_z).ravel())
+        y_parts.append(np.imag(curve_z).ravel())
+        if np.any(finite_curve_w):
+            x_parts.append(np.real(curve_w[finite_curve_w]).ravel())
+            y_parts.append(np.imag(curve_w[finite_curve_w]).ravel())
 
+    all_x = np.concatenate(x_parts)
+    all_y = np.concatenate(y_parts)
     xrange, yrange = padded_range(all_x, all_y)
     base_x, base_y = make_line_segments(z)
     traces = [{
@@ -531,8 +626,16 @@ def transform_frames(
         "x": base_x,
         "y": base_y,
         "line": {"width": 1.35, "color": "#78e0cf"},
+        "name": "input grid",
         "hoverinfo": "skip",
     }]
+    for index, (name, curve_z, _curve_w, _finite_curve_w) in enumerate(highlighted):
+        traces.append(_line_trace(
+            curve_z,
+            name=name,
+            color=HIGHLIGHT_CURVE_COLORS[index % len(HIGHLIGHT_CURVE_COLORS)],
+            width=4.0,
+        ))
 
     frames = []
     for t in np.linspace(0.0, 1.0, frame_count):
@@ -541,16 +644,29 @@ def transform_frames(
         else:
             p = np.where(finite_w, (1 - t) * z + t * w, np.nan + 1j * np.nan)
         px, py = make_line_segments(p)
+        frame_data = [{
+            "type": "scatter",
+            "mode": "lines",
+            "x": px,
+            "y": py,
+            "line": {"width": 1.35, "color": "#78e0cf"},
+            "name": "input grid",
+            "hoverinfo": "skip",
+        }]
+        for index, (name, curve_z, curve_w, finite_curve_w) in enumerate(highlighted):
+            if t == 0.0:
+                curve_p = curve_z
+            else:
+                curve_p = np.where(finite_curve_w, (1 - t) * curve_z + t * curve_w, np.nan + 1j * np.nan)
+            frame_data.append(_line_trace(
+                curve_p,
+                name=name,
+                color=HIGHLIGHT_CURVE_COLORS[index % len(HIGHLIGHT_CURVE_COLORS)],
+                width=4.0,
+            ))
         frames.append({
             "name": f"{t:.2f}",
-            "data": [{
-                "type": "scatter",
-                "mode": "lines",
-                "x": px,
-                "y": py,
-                "line": {"width": 1.35, "color": "#78e0cf"},
-                "hoverinfo": "skip",
-            }],
+            "data": frame_data,
         })
     return traces, frames, xrange, yrange
 
@@ -571,6 +687,10 @@ def compute_plot_cached(
     grid_samples: int,
     highlight_zeros: bool,
     show_singularities: bool,
+    transform_highlight: str = "none",
+    transform_highlight_a: float = 0.0,
+    transform_highlight_b: float = 0.0,
+    transform_highlight_c: float = 1.0,
 ) -> dict[str, Any]:
     if not all(math.isfinite(v) for v in (xmin, xmax, ymin, ymax)):
         raise ValueError("Bounds must be finite numbers")
@@ -588,6 +708,10 @@ def compute_plot_cached(
         raise ValueError("Transform grid lines must be between 3 and 41")
     if not (20 <= grid_samples <= 500):
         raise ValueError("Transform samples per line must be between 20 and 500")
+    if transform_highlight not in {"none", "vertical", "horizontal", "diagonal", "circle", "axes"}:
+        raise ValueError("Unknown transform highlight curve")
+    if not all(math.isfinite(v) for v in (transform_highlight_a, transform_highlight_b, transform_highlight_c)):
+        raise ValueError("Transform highlight values must be finite")
 
     if mode == "colors":
         z = make_grid(xmin, xmax, ymax, ymin, n)
@@ -627,7 +751,26 @@ def compute_plot_cached(
         }
 
     if mode == "transform":
-        traces, frames, xrange, yrange = transform_frames(expr, xmin, xmax, ymin, ymax, frame_count, grid_lines, grid_samples)
+        traces, frames, xrange, yrange = transform_frames(
+            expr,
+            xmin,
+            xmax,
+            ymin,
+            ymax,
+            frame_count,
+            grid_lines,
+            grid_samples,
+            transform_highlight,
+            transform_highlight_a,
+            transform_highlight_b,
+            transform_highlight_c,
+        )
+        mobius = mobius_analysis(expr)
+        message = f"Press Play to move the {grid_lines}x{grid_lines} input grid to its image."
+        if transform_highlight != "none":
+            message += " Highlighted curves are drawn thicker."
+        if mobius:
+            message += f" Detected {mobius['label']} LFT."
         return {
             "kind": "transform",
             "traces": traces,
@@ -635,7 +778,8 @@ def compute_plot_cached(
             "xrange": xrange,
             "yrange": yrange,
             "title": "Grid homotopy: points move from z to its image.",
-            "message": f"Press Play to move the {grid_lines}x{grid_lines} input grid to its image.",
+            "message": message,
+            "mobius": mobius,
         }
 
     raise ValueError(f"Unknown mode: {mode}")
