@@ -33,6 +33,7 @@ SYMPY_FUNCTIONS: dict[str, Any] = {
     "log": sp.log,
     "ln": sp.log,
     "sqrt": sp.sqrt,
+    "sinc": lambda arg: sp.sinc(sp.pi * arg),
     "sec": sp.sec,
     "csc": sp.csc,
     "cot": sp.cot,
@@ -613,6 +614,8 @@ def _validate_ray_avoids_finite_singularities(sym_expr: sp.Expr, segment: dict[s
             return False
         parameter = _ray_parameter_for_point(segment, numeric)
         if parameter is not None:
+            if _removable_at_point(sym_expr, singularity):
+                continue
             raise ValueError(
                 f"A detected singularity at {numeric} lies on the ray to infinity, "
                 "so the integral is undefined for this app's ordinary contour integral mode."
@@ -630,11 +633,21 @@ def _validate_full_line_avoids_finite_singularities(sym_expr: sp.Expr, segment: 
             return False
         parameter = _line_parameter_for_point(segment, numeric)
         if parameter is not None:
+            if _removable_at_point(sym_expr, singularity):
+                continue
             raise ValueError(
                 f"A detected singularity at {numeric} lies on the full line, "
                 "so the integral is undefined for this app's ordinary contour integral mode."
             )
     return True
+
+
+def _removable_at_point(sym_expr: sp.Expr, point: sp.Expr) -> bool:
+    try:
+        value = sp.limit(sym_expr, Z, point)
+    except Exception:
+        return False
+    return _clean_finite_limit(value) is not None
 
 
 def _clean_finite_limit(value: sp.Expr) -> sp.Expr | None:
@@ -1051,6 +1064,48 @@ def _antiderivative_delta_for_segment(antiderivative: sp.Expr, segment: dict[str
     return sp.simplify(antiderivative.subs(Z, _sympy_point(end)) - antiderivative.subs(Z, start_expr))
 
 
+def _definite_integral_value(integrand: sp.Expr, limits: tuple[sp.Symbol, sp.Expr, sp.Expr]) -> sp.Expr | None:
+    variants = [
+        integrand,
+        sp.expand_trig(integrand.rewrite(sp.cos)),
+        sp.expand_trig(integrand.rewrite(sp.sin)),
+    ]
+    seen: set[str] = set()
+    for variant in variants:
+        key = sp.srepr(variant)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            value = sp.integrate(variant, limits)
+        except Exception:
+            continue
+        value = _clean_finite_limit(value)
+        if value is not None:
+            return value
+    return None
+
+
+def _definite_full_line_delta(sym_expr: sp.Expr, segment: dict[str, Any]) -> sp.Expr | None:
+    start = to_complex(segment["start"])
+    direction = _sympy_ray_direction(segment)
+    if direction is None:
+        return None
+    s = sp.Symbol("s", real=True)
+    line_expr = _sympy_point(start) + direction * s
+    return _definite_integral_value(sym_expr.subs(Z, line_expr) * direction, (s, -sp.oo, sp.oo))
+
+
+def _definite_ray_delta(sym_expr: sp.Expr, segment: dict[str, Any]) -> sp.Expr | None:
+    start = to_complex(segment["start"])
+    direction = _sympy_ray_direction(segment)
+    if direction is None:
+        return None
+    s = sp.Symbol("s", positive=True, real=True)
+    ray_expr = _sympy_point(start) + direction * s
+    return _definite_integral_value(sym_expr.subs(Z, ray_expr) * direction, (s, 0, sp.oo))
+
+
 def _attempt_exact_antiderivative(
     expr: str,
     sym_expr: sp.Expr,
@@ -1091,6 +1146,10 @@ def _attempt_exact_antiderivative(
     deltas: list[sp.Expr] = []
     for segment in path:
         delta = _antiderivative_delta_for_segment(antiderivative, segment)
+        if delta is None and segment["type"] == "ray":
+            delta = _definite_ray_delta(sym_expr, segment)
+        if delta is None and segment["type"] == "full_line":
+            delta = _definite_full_line_delta(sym_expr, segment)
         if delta is None:
             return None
         deltas.append(delta)

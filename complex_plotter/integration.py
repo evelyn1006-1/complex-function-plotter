@@ -488,16 +488,6 @@ def integrate_path(
     if len(path_points) < 2:
         raise ValueError("The path is too short to integrate.")
 
-    candidate_points, _features = _candidate_singularities(expr, bounds)
-    contour_tol = max(1e-4, 1e-3 * _diag(bounds))
-    for point in candidate_points:
-        if distance_to_path(path, point, bounds) <= contour_tol:
-            raise ValueError(f"A detected singularity at {point} lies on or too close to the path, so the integral is undefined for this app's ordinary contour integral mode.")
-
-    sampled_values = evaluate(expr, path_points)
-    if np.any(~np.isfinite(sampled_values)):
-        raise ValueError("The integrand hits a non-finite value somewhere on the sampled path. The integral is undefined or needs a principal-value treatment, which this app does not do automatically.")
-
     if method_mode == "auto":
         exact = attempt_exact_integral(expr, path, bounds)
         if exact is not None:
@@ -519,6 +509,16 @@ def integrate_path(
                 exact_value=exact["exact_value"],
                 exact_latex=exact.get("exact_latex"),
             )
+
+    candidate_points, _features = _candidate_singularities(expr, bounds)
+    contour_tol = max(1e-4, 1e-3 * _diag(bounds))
+    for point in candidate_points:
+        if distance_to_path(path, point, bounds) <= contour_tol:
+            raise ValueError(f"A detected singularity at {point} lies on or too close to the path, so the integral is undefined for this app's ordinary contour integral mode.")
+
+    sampled_values = evaluate(expr, path_points)
+    if np.any(~np.isfinite(sampled_values)):
+        raise ValueError("The integrand hits a non-finite value somewhere on the sampled path. The integral is undefined or needs a principal-value treatment, which this app does not do automatically.")
 
     total = 0j
     total_err = 0.0

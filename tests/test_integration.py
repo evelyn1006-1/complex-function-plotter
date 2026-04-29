@@ -8,7 +8,10 @@ from complex_plotter.webapp import path_from_payload
 
 RAY_POSITIVE_REAL = [{"type": "ray", "start": [0, 0], "through": [1, 0]}]
 FULL_REAL_LINE = [{"type": "full_line", "start": [0, 0], "through": [1, 0]}]
+SHIFTED_FULL_REAL_LINE = [{"type": "full_line", "start": [0.5, 0], "through": [1, 0]}]
 REVERSED_FULL_REAL_LINE = [{"type": "full_line", "start": [0, 0], "through": [-1, 0]}]
+DIAGONAL_RAY = [{"type": "ray", "start": [0, 0], "through": [1, 1]}]
+SHIFTED_RAY = [{"type": "ray", "start": [0.5, 0], "through": [1, 0]}]
 BOUNDS = (-1, 3, -1, 1)
 
 
@@ -28,6 +31,47 @@ class IntegrationTests(unittest.TestCase):
         self.assertAlmostEqual(result["value"][0], math.sqrt(math.pi) / 2)
         self.assertAlmostEqual(result["value"][1], 0.0)
 
+    def test_fresnel_improper_rays_are_exact_not_numerical_warnings(self) -> None:
+        for expr in ("sin(z**2)", "cos(z**2)"):
+            with self.subTest(expr=expr):
+                result = integrate_path(expr, RAY_POSITIVE_REAL, (-1, 5, -1, 1), method_mode="auto")
+
+                self.assertEqual(result["method"], "exact")
+                self.assertEqual(result["exact_value"], "sqrt(2)*sqrt(pi)/4")
+                self.assertAlmostEqual(result["value"][0], math.sqrt(math.pi / 8))
+                self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_divergent_diagonal_fresnel_rays_are_not_reported_as_exact(self) -> None:
+        for expr in ("sin(z**2)", "cos(z**2)"):
+            with self.subTest(expr=expr):
+                result = integrate_path(expr, DIAGONAL_RAY, (-2, 2, -2, 2), method_mode="auto")
+
+                self.assertEqual(result["method"], "numerical")
+                self.assertEqual(result["status"], "nonfinite")
+
+    def test_quadratic_phase_ray_uses_definite_symbolic_fallback(self) -> None:
+        result = integrate_path("exp(i*z**2)", RAY_POSITIVE_REAL, (-2, 5, -2, 2), method_mode="auto")
+
+        self.assertEqual(result["method"], "exact")
+        self.assertEqual(result["exact_value"], "sqrt(2)*i*sqrt(pi)*(1 - i)/4")
+        self.assertAlmostEqual(result["value"][0], math.sqrt(math.pi / 8))
+        self.assertAlmostEqual(result["value"][1], math.sqrt(math.pi / 8))
+
+    def test_shifted_quadratic_phase_ray_keeps_tail_value(self) -> None:
+        result = integrate_path("exp(i*z**2)", SHIFTED_RAY, (-2, 5, -2, 2), method_mode="auto")
+
+        self.assertEqual(result["method"], "exact")
+        self.assertAlmostEqual(result["value"][0], 0.1297730394429554)
+        self.assertAlmostEqual(result["value"][1], 0.5851760443892027)
+
+    def test_normalized_sinc_ray_uses_exact_antiderivative(self) -> None:
+        result = integrate_path("sinc(z)", RAY_POSITIVE_REAL, (-1, 5, -1, 1), method_mode="auto")
+
+        self.assertEqual(result["method"], "exact")
+        self.assertEqual(result["exact_value"], "1/2")
+        self.assertAlmostEqual(result["value"][0], 0.5)
+        self.assertAlmostEqual(result["value"][1], 0.0)
+
     def test_divergent_ray_antiderivative_limit_is_not_reported_as_exact(self) -> None:
         exact = attempt_exact_integral("exp(z)", RAY_POSITIVE_REAL, BOUNDS)
 
@@ -39,6 +83,14 @@ class IntegrationTests(unittest.TestCase):
         self.assertIn(result["method"], {"exact", "residue-derivation"})
         self.assertEqual(result["exact_value"], "1")
         self.assertAlmostEqual(result["value"][0], 1.0)
+        self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_removable_origin_on_ray_can_still_use_exact_antiderivative(self) -> None:
+        result = integrate_path("sin(z)/z", RAY_POSITIVE_REAL, (-1, 5, -1, 1), method_mode="auto")
+
+        self.assertEqual(result["method"], "exact")
+        self.assertEqual(result["exact_value"], "pi/2")
+        self.assertAlmostEqual(result["value"][0], math.pi / 2)
         self.assertAlmostEqual(result["value"][1], 0.0)
 
     def test_even_rational_half_line_uses_residue_derivation(self) -> None:
@@ -65,6 +117,26 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result["method"], "exact")
         self.assertAlmostEqual(result["value"][0], math.sqrt(math.pi))
         self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_fresnel_improper_full_lines_are_exact_not_numerical_warnings(self) -> None:
+        for expr in ("sin(z**2)", "cos(z**2)"):
+            with self.subTest(expr=expr):
+                result = integrate_path(expr, FULL_REAL_LINE, (-5, 5, -1, 1), method_mode="auto")
+
+                self.assertEqual(result["method"], "exact")
+                self.assertEqual(result["exact_value"], "sqrt(2)*sqrt(pi)/2")
+                self.assertAlmostEqual(result["value"][0], math.sqrt(math.pi / 2))
+                self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_shifted_real_full_line_fresnel_integrals_are_exact(self) -> None:
+        for expr in ("sin(z**2)", "cos(z**2)"):
+            with self.subTest(expr=expr):
+                result = integrate_path(expr, SHIFTED_FULL_REAL_LINE, (-5, 5, -1, 1), method_mode="auto")
+
+                self.assertEqual(result["method"], "exact")
+                self.assertEqual(result["exact_value"], "sqrt(2)*sqrt(pi)/2")
+                self.assertAlmostEqual(result["value"][0], math.sqrt(math.pi / 2))
+                self.assertAlmostEqual(result["value"][1], 0.0)
 
     def test_repeated_upper_pole_is_counted_once_in_residue_derivation(self) -> None:
         result = integrate_path("1/(z**2+1)**2", FULL_REAL_LINE, (-3, 3, -2, 2), method_mode="auto")
@@ -162,7 +234,7 @@ class IntegrationTests(unittest.TestCase):
             integrate_path("1/(z-5)**2", RAY_POSITIVE_REAL, (-1, 1, -1, 1), method_mode="auto")
 
     def test_real_axis_pole_is_rejected_instead_of_using_residue_shortcut(self) -> None:
-        with self.assertRaisesRegex(ValueError, "non-finite value"):
+        with self.assertRaisesRegex(ValueError, "lies on the ray to infinity"):
             integrate_path("1/(z**2-1)", RAY_POSITIVE_REAL, (-0.5, 0.5, -1, 1), method_mode="auto")
 
 
