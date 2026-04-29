@@ -193,6 +193,28 @@
       font-weight: 600;
       vertical-align: baseline;
     }
+    .formula-clamp {
+      display: inline-block;
+      max-width: 100%;
+      max-height: calc(1.45em * var(--lines, 2));
+      overflow: hidden;
+      vertical-align: top;
+      white-space: pre-wrap;
+    }
+    .formula-clamp.expanded { max-height: none; }
+    .expand-formula {
+      display: inline;
+      width: auto;
+      margin-left: 0.25rem;
+      padding: 0.06rem 0.32rem;
+      border-radius: 7px;
+      border-color: rgba(160, 205, 198, 0.32);
+      background: rgba(160, 205, 198, 0.08);
+      color: var(--soft);
+      font: inherit;
+      font-weight: 600;
+      vertical-align: baseline;
+    }
     .latex-render {
       margin-top: 0.7rem;
       padding: 0.65rem 0.8rem;
@@ -631,7 +653,7 @@ $('mode').addEventListener('change', onModeChange);
 $('transformHighlight').addEventListener('change', updateTransformCurveControls);
 $('tool').addEventListener('change', () => { state.pending = []; updateIntegrationHints(); renderIntegrationPreview(); });
 $('arcOrientation').addEventListener('change', () => { clearIntegrationResult(); renderIntegrationPreview(); });
-$('integrationMethod').addEventListener('change', clearIntegrationResult);
+$('integrationMethod').addEventListener('change', () => { clearIntegrationResult(); updateIntegrationHints(); });
 $('undoBtn').addEventListener('click', undoPathThing);
 $('closeLoopBtn').addEventListener('click', closeLoopLocally);
 $('reversePathBtn').addEventListener('click', () => { if (!state.pending.length) { state.path = reversePathLocal(state.path); clearIntegrationResult(); renderIntegrationPreview(); } });
@@ -1098,11 +1120,34 @@ function updateIntegrationHints() {
   };
   $('integrationInstructions').textContent = `${map[tool]} Pending points: ${p}.`;
   $('pathSummary').textContent = summarizePathLocal();
-  $('integrationInfo').textContent = isClosedLocal(state.path)
-    ? 'Closed contour detected. Residue / Cauchy shortcuts may be used when the expression is in the app’s conservative theorem-safe class.'
-    : 'Open path. Numerical line integration will be used.';
+  $('integrationInfo').textContent = integrationMethodHint();
   renderPathEditor();
   updateButtonStates();
+}
+
+function integrationMethodHint() {
+  if (!state.path.length) return 'Draw a path to choose an integration strategy.';
+  const method = $('integrationMethod').value;
+  const closed = isClosedLocal(state.path);
+  const hasImproper = state.path.some(seg => seg.type === 'ray' || seg.type === 'full_line');
+  if (method === 'numeric') {
+    return hasImproper
+      ? 'Numerical improper quadrature will be used.'
+      : 'Numerical line integration will be used.';
+  }
+  if (closed) {
+    return method === 'auto'
+      ? 'Closed contour detected. Exact residues are tried first, with theorem / numeric fallback.'
+      : 'Closed contour detected. Residue / Cauchy shortcuts may be used when the expression is in the app’s conservative theorem-safe class.';
+  }
+  if (method === 'auto') {
+    return hasImproper
+      ? 'Improper path detected. Exact limits or residue derivations are tried first, with numerical quadrature fallback.'
+      : 'Open path. Exact antiderivatives are tried first, with numerical line integration fallback.';
+  }
+  return hasImproper
+    ? 'Improper path. Numerical quadrature will be used.'
+    : 'Open path. Numerical line integration will be used.';
 }
 
 function summarizePathLocal() {
@@ -2051,6 +2096,27 @@ function appendExactFormula(container, text, latex) {
   container.appendChild(button);
 }
 
+function appendExpandableFormula(container, text, latex, collapsedLines=2) {
+  const wrap = document.createElement('span');
+  wrap.className = 'formula-clamp';
+  wrap.style.setProperty('--lines', String(collapsedLines));
+  appendExactFormula(wrap, text, latex);
+  container.appendChild(wrap);
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'expand-formula';
+  button.textContent = '...';
+  button.title = 'Expand this series';
+  button.addEventListener('click', () => {
+    wrap.classList.toggle('expanded');
+    const expanded = wrap.classList.contains('expanded');
+    button.textContent = expanded ? 'show less' : '...';
+    button.title = expanded ? 'Collapse this series' : 'Expand this series';
+  });
+  container.appendChild(button);
+}
+
 function appendFormulaLine(container, label, text, latex) {
   appendResultText(container, label);
   appendExactFormula(container, text, latex);
@@ -2120,12 +2186,12 @@ function renderIntegrationResult(data) {
       if (item.residue_note) appendResultLine(result, `      ${item.residue_note}`);
       if (item.laurent_series) {
         appendResultText(result, '      Laurent: ');
-        appendExactFormula(result, item.laurent_series, item.laurent_series_latex);
+        appendExpandableFormula(result, item.laurent_series, item.laurent_series_latex, 2);
         appendResultText(result, '\n');
       }
       if (item.denominator_series) {
         appendResultText(result, `      denominator zero order ${item.denominator_zero_order}: `);
-        appendExactFormula(result, item.denominator_series, item.denominator_series_latex);
+        appendExpandableFormula(result, item.denominator_series, item.denominator_series_latex, item.denominator_zero_order === 1 ? 1 : 2);
         appendResultText(result, '\n');
       }
     }
