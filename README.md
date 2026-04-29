@@ -27,13 +27,15 @@ Click inside the plot to build a path from:
 - cubic Bézier curves
 - freeform polylines
 - rays to infinity
+- full lines from `-∞` to `∞`
 
 After drawing, the app computes the contour integral with **Exact first** mode by default. When the expression is simple enough, the app reports both an exact symbolic value and a decimal approximation. Exact formulas are clickable and render as LaTeX. You can also switch to theorem/numeric fallback mode or numerical-only mode.
 
 Exact mode currently handles:
 - **Closed contours** where SymPy can enumerate isolated meromorphic singularities in the plot bounds, including polynomial denominators and common Laurent-series cases like `1/sin(z)` or `1/(exp(z)-1)`. Individual enclosed residues are shown exactly too.
 - **Open contours** of conservatively recognized entire functions when SymPy finds an elementary antiderivative
-- **Rays to infinity** of conservatively recognized entire functions when SymPy finds an antiderivative and a finite symbolic limit along the ray
+- **Rays to infinity and full lines** when SymPy finds an antiderivative and finite symbolic limits at infinity. Meromorphic antiderivative support is conservative and currently limited to single improper line/ray paths. Full lines cannot be combined with other path segments.
+- **Residue derivations** for classic real-axis integrals, including rational full-line integrals, even rational half-line integrals, Fourier/Jordan-lemma integrals of `exp(i*a*z)`, `cos(a*z)`, or `sin(a*z)` times a rational factor, and keyhole-contour rational half-line integrals.
 
 For exact residues, the result panel includes local observability such as pole order, Laurent expansion snippets, and denominator series when available.
 
@@ -170,7 +172,7 @@ Examples:
 - Integration mode is intentionally conservative about theorem shortcuts.
 - Branch cuts and non-analytic expressions fall back to direct numerical path integration.
 - Principal value integrals are **not** implemented automatically.
-- Rays to infinity can be exact when a symbolic antiderivative has a finite limit along the ray; divergent, conditionally convergent, or symbolically ambiguous cases fall back to numerical quadrature and may still produce warnings or non-finite results.
+- Rays to infinity and full lines can be exact when a symbolic antiderivative has finite limits at infinity; divergent, conditionally convergent, or symbolically ambiguous cases fall back to numerical quadrature and may still produce warnings or non-finite results.
 - Bound inputs accept decimal numbers and fractions like `1/2` or `-3/4`.
 
 Love you always and forever!~

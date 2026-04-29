@@ -389,13 +389,14 @@ def _result(
     value: sp.Expr,
     notes: list[str],
     residues: list[dict[str, Any]] | None = None,
+    method: str = "exact",
 ) -> dict[str, Any] | None:
     value = sp.trigsimp(sp.simplify(value.rewrite(sp.sin)))
     numeric = _complex_from_sympy(value)
     if numeric is None:
         return None
     return {
-        "method": "exact",
+        "method": method,
         "value": numeric,
         "exact_value": _exact_text(value),
         "exact_latex": _exact_latex(value),
@@ -489,6 +490,13 @@ def _sympy_point(point: complex) -> sp.Expr:
     return sp.Rational(repr(float(np.real(point)))) + sp.I * sp.Rational(repr(float(np.imag(point))))
 
 
+def _exact_meromorphic_features(features: Any) -> bool:
+    if features.has_branchy or features.has_nonanalytic or features.has_piecewise:
+        return False
+    function_names = set(features.used_names) - SAFE_CONSTANTS
+    return bool(function_names <= EXACT_MEROMORPHIC_FUNCTIONS)
+
+
 def _sympy_ray_direction(segment: dict[str, Any]) -> sp.Expr | None:
     start = to_complex(segment["start"])
     through = to_complex(segment["through"])
@@ -505,6 +513,130 @@ def _sympy_ray_direction(segment: dict[str, Any]) -> sp.Expr | None:
     return _sympy_point(unit)
 
 
+def _ray_parameter_for_point(segment: dict[str, Any], point: complex, tol: float = 1e-8) -> float | None:
+    start = to_complex(segment["start"])
+    through = to_complex(segment["through"])
+    direction = through - start
+    if abs(direction) < 1e-12:
+        return None
+    direction /= abs(direction)
+    relative = point - start
+    parameter = float(relative.real * direction.real + relative.imag * direction.imag)
+    perpendicular = abs(relative - parameter * direction)
+    scale = max(1.0, abs(start), abs(point))
+    if perpendicular <= tol * scale and parameter >= -tol * scale:
+        return parameter
+    return None
+
+
+def _line_parameter_for_point(segment: dict[str, Any], point: complex, tol: float = 1e-8) -> float | None:
+    start = to_complex(segment["start"])
+    through = to_complex(segment["through"])
+    direction = through - start
+    if abs(direction) < 1e-12:
+        return None
+    direction /= abs(direction)
+    relative = point - start
+    parameter = float(relative.real * direction.real + relative.imag * direction.imag)
+    perpendicular = abs(relative - parameter * direction)
+    scale = max(1.0, abs(start), abs(point))
+    if perpendicular <= tol * scale:
+        return parameter
+    return None
+
+
+def _is_positive_real_ray_from_origin(path: list[dict[str, Any]], tol: float = 1e-8) -> bool:
+    if len(path) != 1 or path[0]["type"] != "ray":
+        return False
+    return _is_positive_real_improper_segment_from_origin(path[0], tol)
+
+
+def _is_positive_real_full_line_from_origin(path: list[dict[str, Any]], tol: float = 1e-8) -> bool:
+    if len(path) != 1 or path[0]["type"] != "full_line":
+        return False
+    return _is_positive_real_improper_segment_from_origin(path[0], tol)
+
+
+def _is_positive_real_improper_segment_from_origin(segment: dict[str, Any], tol: float = 1e-8) -> bool:
+    start = to_complex(segment["start"])
+    through = to_complex(segment["through"])
+    direction = through - start
+    if abs(start) > tol or abs(direction) < tol:
+        return False
+    direction /= abs(direction)
+    return bool(abs(direction.imag) <= tol and direction.real > 0)
+
+
+def _finite_singularity_points(sym_expr: sp.Expr) -> list[sp.Expr] | None:
+    try:
+        singularities = sp.singularities(sym_expr, Z)
+    except Exception:
+        return None
+    if singularities in (sp.S.EmptySet, sp.EmptySet):
+        return []
+    if isinstance(singularities, sp.FiniteSet):
+        return list(singularities)
+    if isinstance(singularities, sp.Union):
+        points: list[sp.Expr] = []
+        for subset in singularities.args:
+            subset_points = _finite_singularity_points_from_set(subset)
+            if subset_points is None:
+                return None
+            points.extend(subset_points)
+        return points
+    return None
+
+
+def _finite_singularity_points_from_set(singularities: sp.Set) -> list[sp.Expr] | None:
+    if singularities in (sp.S.EmptySet, sp.EmptySet):
+        return []
+    if isinstance(singularities, sp.FiniteSet):
+        return list(singularities)
+    if isinstance(singularities, sp.Union):
+        points: list[sp.Expr] = []
+        for subset in singularities.args:
+            subset_points = _finite_singularity_points_from_set(subset)
+            if subset_points is None:
+                return None
+            points.extend(subset_points)
+        return points
+    return None
+
+
+def _validate_ray_avoids_finite_singularities(sym_expr: sp.Expr, segment: dict[str, Any]) -> bool:
+    singularities = _finite_singularity_points(sym_expr)
+    if singularities is None:
+        return False
+    for singularity in singularities:
+        numeric = _complex_from_sympy(singularity)
+        if numeric is None:
+            return False
+        parameter = _ray_parameter_for_point(segment, numeric)
+        if parameter is not None:
+            raise ValueError(
+                f"A detected singularity at {numeric} lies on the ray to infinity, "
+                "so the integral is undefined for this app's ordinary contour integral mode."
+            )
+    return True
+
+
+def _validate_full_line_avoids_finite_singularities(sym_expr: sp.Expr, segment: dict[str, Any]) -> bool:
+    singularities = _finite_singularity_points(sym_expr)
+    if singularities is None:
+        return False
+    for singularity in singularities:
+        numeric = _complex_from_sympy(singularity)
+        if numeric is None:
+            return False
+        parameter = _line_parameter_for_point(segment, numeric)
+        if parameter is not None:
+            raise ValueError(
+                f"A detected singularity at {numeric} lies on the full line, "
+                "so the integral is undefined for this app's ordinary contour integral mode."
+            )
+    return True
+
+
 def _clean_finite_limit(value: sp.Expr) -> sp.Expr | None:
     value = sp.trigsimp(sp.simplify(value.rewrite(sp.sin)))
     if value in (sp.oo, -sp.oo, sp.zoo, sp.nan) or value.has(sp.oo, -sp.oo, sp.zoo, sp.nan):
@@ -516,8 +648,367 @@ def _clean_finite_limit(value: sp.Expr) -> sp.Expr | None:
     return value
 
 
+def _rational_polys(sym_expr: sp.Expr) -> tuple[sp.Poly, sp.Poly] | None:
+    if not sym_expr.is_rational_function(Z):
+        return None
+    try:
+        numerator, denominator = sp.fraction(sp.together(sym_expr))
+        numerator_poly = sp.Poly(numerator, Z)
+        denominator_poly = sp.Poly(denominator, Z)
+    except Exception:
+        return None
+    if denominator_poly.is_zero:
+        return None
+    return numerator_poly, denominator_poly
+
+
+def _poly_has_real_coefficients(poly: sp.Poly) -> bool:
+    for coefficient in poly.all_coeffs():
+        if not _is_zero_expr(sp.im(coefficient)):
+            return False
+    return True
+
+
+def _polynomial_roots_exact(poly: sp.Poly) -> list[sp.Expr] | None:
+    try:
+        roots = sp.roots(poly.as_expr(), Z)
+    except Exception:
+        return None
+    if sum(roots.values()) != poly.degree():
+        return None
+    return list(roots)
+
+
+def _residue_marker(sym_expr: sp.Expr, pole: sp.Expr, residue: sp.Expr) -> dict[str, Any] | None:
+    pole_numeric = _complex_from_sympy(pole)
+    residue_numeric = _complex_from_sympy(residue)
+    if pole_numeric is None or residue_numeric is None:
+        return None
+    return {
+        "point": [float(pole_numeric.real), float(pole_numeric.imag)],
+        "point_labels": complex_component_labels(pole_numeric),
+        "winding": 1,
+        "residue": [float(residue_numeric.real), float(residue_numeric.imag)],
+        "residue_labels": complex_component_labels(residue_numeric),
+        "exact_residue": _exact_text(residue),
+        "exact_residue_latex": _exact_latex(residue),
+        "exact_point": _exact_text(pole),
+        "exact_point_latex": _exact_latex(pole),
+        "radius": 0.0,
+        **_local_residue_observability(sym_expr, pole, _pole_order(sym_expr, pole)),
+    }
+
+
+def _attempt_real_axis_rational_residue(
+    expr: str,
+    sym_expr: sp.Expr,
+    path: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    is_full_line = _is_positive_real_full_line_from_origin(path)
+    is_half_line = _is_positive_real_ray_from_origin(path)
+    if not (is_full_line or is_half_line):
+        return None
+
+    features = analyze_expression(expr)
+    if not _exact_meromorphic_features(features):
+        return None
+
+    rational = _rational_polys(sym_expr)
+    if rational is None:
+        return None
+    numerator_poly, denominator_poly = rational
+    if not (_poly_has_real_coefficients(numerator_poly) and _poly_has_real_coefficients(denominator_poly)):
+        return None
+    if is_half_line and not _is_zero_expr(sp.simplify(sym_expr.subs(Z, -Z) - sym_expr)):
+        return None
+    if denominator_poly.degree() - numerator_poly.degree() < 2:
+        return None
+
+    poles = _polynomial_roots_exact(denominator_poly)
+    if poles is None:
+        return None
+
+    upper_poles: list[sp.Expr] = []
+    for pole in poles:
+        pole_numeric = _complex_from_sympy(pole)
+        if pole_numeric is None:
+            return None
+        if abs(pole_numeric.imag) <= 1e-8:
+            return None
+        if pole_numeric.imag > 0:
+            upper_poles.append(pole)
+    if not upper_poles:
+        return None
+
+    total_residue = sp.Integer(0)
+    residue_markers: list[dict[str, Any]] = []
+    for pole in upper_poles:
+        residue = sp.trigsimp(sp.simplify(sp.residue(sym_expr, Z, pole).rewrite(sp.sin)))
+        marker = _residue_marker(sym_expr, pole, residue)
+        if marker is None:
+            return None
+        total_residue += residue
+        residue_markers.append(marker)
+
+    pole_list = ", ".join(_exact_text(pole) for pole in upper_poles)
+    multiplier = 2 * sp.pi * sp.I if is_full_line else sp.pi * sp.I
+    leading_note = (
+        "Residue derivation: integrate over the full real line from -infinity to infinity."
+        if is_full_line
+        else "Residue derivation: the integrand is an even rational function, so the half-line integral is one half of the real-line integral."
+    )
+    conclusion = (
+        "Therefore the full-line integral equals 2*pi*i times the sum of those residues."
+        if is_full_line
+        else "Therefore the ray integral equals pi*i times the sum of those residues."
+    )
+    return _result(
+        value=multiplier * total_residue,
+        method="residue-derivation",
+        residues=residue_markers,
+        notes=[
+            leading_note,
+            "Use an upper half-plane semicircle. The denominator degree exceeds the numerator degree by at least 2, so the arc contribution tends to 0.",
+            f"Enclosed upper half-plane poles: {pole_list}.",
+            conclusion,
+        ],
+    )
+
+
+def _linear_real_frequency(arg: sp.Expr) -> sp.Expr | None:
+    coeff = sp.simplify(sp.diff(arg, Z))
+    offset = sp.simplify(arg.subs(Z, 0))
+    if coeff.has(Z) or not _is_zero_expr(offset):
+        return None
+    coeff_numeric = _complex_from_sympy(coeff)
+    if coeff_numeric is None or abs(coeff_numeric.imag) > 1e-10:
+        return None
+    if abs(coeff_numeric.real) <= 1e-12:
+        return None
+    return sp.simplify(coeff if coeff_numeric.real > 0 else -coeff)
+
+
+def _linear_imaginary_frequency(arg: sp.Expr) -> sp.Expr | None:
+    coeff = sp.simplify(sp.diff(arg, Z))
+    offset = sp.simplify(arg.subs(Z, 0))
+    if coeff.has(Z) or not _is_zero_expr(offset):
+        return None
+    frequency = sp.simplify(coeff / sp.I)
+    frequency_numeric = _complex_from_sympy(frequency)
+    if frequency_numeric is None or abs(frequency_numeric.imag) > 1e-10:
+        return None
+    if abs(frequency_numeric.real) <= 1e-12:
+        return None
+    return frequency
+
+
+def _trig_rational_parts(sym_expr: sp.Expr) -> tuple[str, sp.Expr, sp.Expr] | None:
+    cos_terms = list(sym_expr.atoms(sp.cos))
+    sin_terms = list(sym_expr.atoms(sp.sin))
+    exp_terms = [term for term in sym_expr.atoms(sp.exp) if _linear_imaginary_frequency(term.args[0]) is not None]
+    if sum(bool(items) for items in (cos_terms, sin_terms, exp_terms)) != 1:
+        return None
+
+    projection = "identity"
+    if cos_terms:
+        if len(cos_terms) != 1:
+            return None
+        active_term = cos_terms[0]
+        frequency = _linear_real_frequency(active_term.args[0])
+        projection = "real"
+    elif sin_terms:
+        if len(sin_terms) != 1:
+            return None
+        active_term = sin_terms[0]
+        frequency = _linear_real_frequency(active_term.args[0])
+        projection = "imag"
+    else:
+        if len(exp_terms) != 1:
+            return None
+        active_term = exp_terms[0]
+        frequency = _linear_imaginary_frequency(active_term.args[0])
+
+    if frequency is None:
+        return None
+    rational_part = sp.simplify(sym_expr / active_term)
+    if rational_part.has(sp.sin, sp.cos, sp.exp, sp.log):
+        return None
+    if _rational_polys(rational_part) is None:
+        return None
+    return projection, frequency, rational_part
+
+
+def _project_fourier_value(value: sp.Expr, projection: str) -> sp.Expr:
+    if projection == "real":
+        return sp.simplify(sp.re(value))
+    if projection == "imag":
+        return sp.simplify(sp.im(value))
+    return sp.simplify(value)
+
+
+def _attempt_real_axis_fourier_rational_residue(
+    expr: str,
+    sym_expr: sp.Expr,
+    path: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    is_full_line = _is_positive_real_full_line_from_origin(path)
+    is_half_line = _is_positive_real_ray_from_origin(path)
+    if not (is_full_line or is_half_line):
+        return None
+
+    features = analyze_expression(expr)
+    if not _exact_meromorphic_features(features):
+        return None
+    if is_half_line and not _is_zero_expr(sp.simplify(sym_expr.subs(Z, -Z) - sym_expr)):
+        return None
+
+    parts = _trig_rational_parts(sym_expr)
+    if parts is None:
+        return None
+    projection, frequency, rational_part = parts
+    rational = _rational_polys(rational_part)
+    if rational is None:
+        return None
+    numerator_poly, denominator_poly = rational
+    if not (_poly_has_real_coefficients(numerator_poly) and _poly_has_real_coefficients(denominator_poly)):
+        return None
+    if denominator_poly.degree() <= numerator_poly.degree():
+        return None
+
+    poles = _polynomial_roots_exact(denominator_poly)
+    if poles is None:
+        return None
+
+    frequency_numeric = _complex_from_sympy(frequency)
+    if frequency_numeric is None or abs(frequency_numeric.imag) > 1e-10:
+        return None
+    use_upper_half_plane = frequency_numeric.real > 0
+    enclosed_poles: list[sp.Expr] = []
+    for pole in poles:
+        pole_numeric = _complex_from_sympy(pole)
+        if pole_numeric is None:
+            return None
+        if abs(pole_numeric.imag) <= 1e-8:
+            return None
+        if (use_upper_half_plane and pole_numeric.imag > 0) or (not use_upper_half_plane and pole_numeric.imag < 0):
+            enclosed_poles.append(pole)
+    if not enclosed_poles:
+        return None
+
+    contour_expr = sp.exp(sp.I * frequency * Z) * rational_part
+    total_residue = sp.Integer(0)
+    residue_markers: list[dict[str, Any]] = []
+    for pole in enclosed_poles:
+        residue = sp.trigsimp(sp.simplify(sp.residue(contour_expr, Z, pole).rewrite(sp.sin)))
+        marker = _residue_marker(contour_expr, pole, residue)
+        if marker is None:
+            return None
+        total_residue += residue
+        residue_markers.append(marker)
+
+    contour_factor = 2 * sp.pi * sp.I if use_upper_half_plane else -2 * sp.pi * sp.I
+    full_line_value = _project_fourier_value(contour_factor * total_residue, projection)
+    value = sp.simplify(full_line_value if is_full_line else full_line_value / 2)
+    pole_list = ", ".join(_exact_text(pole) for pole in enclosed_poles)
+    half_plane = "upper" if use_upper_half_plane else "lower"
+    projection_text = {
+        "real": "real part",
+        "imag": "imaginary part",
+        "identity": "value",
+    }[projection]
+    leading_note = (
+        f"Residue derivation: rewrite the integrand using an exp(i*a*z) rational contour integral and take its {projection_text}."
+        if is_full_line
+        else f"Residue derivation: the integrand is even, so the half-line integral is one half of the full real-line {projection_text}."
+    )
+    conclusion = (
+        f"Take the {projection_text} of the residue-theorem value to recover the full-line integral."
+        if is_full_line
+        else f"Take one half of the {projection_text} of the residue-theorem value to recover the ray integral."
+    )
+    return _result(
+        value=value,
+        method="residue-derivation",
+        residues=residue_markers,
+        notes=[
+            leading_note,
+            f"Use the {half_plane} half-plane contour for exp(i*({_exact_text(frequency)})*z) times the rational factor. Jordan's lemma applies because the exponential decays there and the rational factor tends to 0.",
+            f"Enclosed {half_plane} half-plane poles: {pole_list}.",
+            conclusion,
+        ],
+    )
+
+
+def _branch_log_offset_for_positive_keyhole(point: sp.Expr) -> sp.Expr | None:
+    numeric = _complex_from_sympy(point)
+    if numeric is None:
+        return None
+    if abs(numeric.imag) <= 1e-8 and numeric.real > 0:
+        return None
+    return 2 * sp.pi * sp.I if numeric.imag < -1e-8 else sp.Integer(0)
+
+
+def _attempt_keyhole_rational_half_line_residue(
+    expr: str,
+    sym_expr: sp.Expr,
+    path: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not _is_positive_real_ray_from_origin(path):
+        return None
+
+    features = analyze_expression(expr)
+    if not _exact_meromorphic_features(features):
+        return None
+
+    rational = _rational_polys(sym_expr)
+    if rational is None:
+        return None
+    numerator_poly, denominator_poly = rational
+    if not (_poly_has_real_coefficients(numerator_poly) and _poly_has_real_coefficients(denominator_poly)):
+        return None
+    if denominator_poly.degree() - numerator_poly.degree() < 2:
+        return None
+    if _is_zero_expr(denominator_poly.as_expr().subs(Z, 0)):
+        return None
+
+    poles = _polynomial_roots_exact(denominator_poly)
+    if poles is None:
+        return None
+
+    total = sp.Integer(0)
+    residue_markers: list[dict[str, Any]] = []
+    for pole in poles:
+        pole_numeric = _complex_from_sympy(pole)
+        if pole_numeric is None:
+            return None
+        if abs(pole_numeric.imag) <= 1e-8 and pole_numeric.real > 0:
+            return None
+        branch_offset = _branch_log_offset_for_positive_keyhole(pole)
+        if branch_offset is None:
+            return None
+        weighted_residue = sp.trigsimp(sp.simplify(sp.residue(sym_expr * (sp.log(Z) + branch_offset), Z, pole).rewrite(sp.sin)))
+        marker = _residue_marker(sym_expr, pole, weighted_residue)
+        if marker is None:
+            return None
+        total += weighted_residue
+        residue_markers.append(marker)
+
+    pole_list = ", ".join(_exact_text(pole) for pole in poles)
+    return _result(
+        value=-total,
+        method="residue-derivation",
+        residues=residue_markers,
+        notes=[
+            "Residue derivation: use a keyhole contour around the positive real axis with the branch 0 < arg(z) < 2*pi.",
+            "The large and small circular arcs vanish because the rational integrand decays faster than 1/z at infinity and is finite at the origin.",
+            f"Poles inside the keyhole contour: {pole_list}.",
+            "The jump in log(z) across the positive real axis isolates the desired half-line integral, giving minus the sum of the log-weighted residues.",
+        ],
+    )
+
+
 def _antiderivative_delta_for_segment(antiderivative: sp.Expr, segment: dict[str, Any]) -> sp.Expr | None:
-    start = segment_start(segment)
+    start = to_complex(segment["start"]) if segment["type"] == "full_line" else segment_start(segment)
     if start is None:
         return None
     start_expr = _sympy_point(start)
@@ -537,6 +1028,23 @@ def _antiderivative_delta_for_segment(antiderivative: sp.Expr, segment: dict[str
             return None
         return sp.simplify(tail_value - antiderivative.subs(Z, start_expr))
 
+    if segment["type"] == "full_line":
+        direction = _sympy_ray_direction(segment)
+        if direction is None:
+            return None
+        s = sp.Symbol("s", real=True)
+        line_expr = start_expr + direction * s
+        try:
+            positive_tail = sp.limit(antiderivative.subs(Z, line_expr), s, sp.oo)
+            negative_tail = sp.limit(antiderivative.subs(Z, line_expr), s, -sp.oo)
+        except Exception:
+            return None
+        positive_tail = _clean_finite_limit(positive_tail)
+        negative_tail = _clean_finite_limit(negative_tail)
+        if positive_tail is None or negative_tail is None:
+            return None
+        return sp.simplify(positive_tail - negative_tail)
+
     end = segment_end(segment)
     if end is None:
         return None
@@ -549,14 +1057,28 @@ def _attempt_exact_antiderivative(
     path: list[dict[str, Any]],
 ) -> dict[str, Any] | None:
     features = analyze_expression(expr)
-    if not features.proven_entire:
-        return None
-
     has_ray = any(segment["type"] == "ray" for segment in path)
-    start, end = finite_endpoints(path)
-    if start is None or (end is None and not has_ray):
+    has_full_line = any(segment["type"] == "full_line" for segment in path)
+    has_improper = has_ray or has_full_line
+    meromorphic_ray = (
+        has_improper
+        and len(path) == 1
+        and path[0]["type"] in {"ray", "full_line"}
+        and _exact_meromorphic_features(features)
+        and not features.proven_entire
+    )
+    if not features.proven_entire and not meromorphic_ray:
         return None
-    if not has_ray and end is not None and abs(start - end) <= 1e-12:
+    if meromorphic_ray:
+        if path[0]["type"] == "ray" and not _validate_ray_avoids_finite_singularities(sym_expr, path[0]):
+            return None
+        if path[0]["type"] == "full_line" and not _validate_full_line_avoids_finite_singularities(sym_expr, path[0]):
+            return None
+
+    start, end = finite_endpoints(path)
+    if (start is None and not has_full_line) or (end is None and not has_improper):
+        return None
+    if not has_improper and start is not None and end is not None and abs(start - end) <= 1e-12:
         return _result(
             value=sp.Integer(0),
             notes=["Exact mode: the contour is closed and the integrand is in the app's conservative entire-function class."],
@@ -574,10 +1096,15 @@ def _attempt_exact_antiderivative(
         deltas.append(delta)
 
     value = sp.simplify(sum(deltas, sp.Integer(0)))
-    if has_ray:
+    if has_improper:
+        note = (
+            "Exact mode: used a SymPy antiderivative of a meromorphic integrand and convergent symbolic limits at infinity."
+            if meromorphic_ray
+            else "Exact mode: used a SymPy antiderivative and convergent symbolic limits at infinity."
+        )
         return _result(
             value=value,
-            notes=["Exact mode: used a SymPy antiderivative and a convergent symbolic limit along the ray to infinity."],
+            notes=[note],
         )
     return _result(
         value=value,
@@ -597,4 +1124,13 @@ def attempt_exact_integral(
     residue_result = _attempt_exact_residues(expr, sym_expr, path, bounds)
     if residue_result is not None:
         return residue_result
+    residue_ray_result = _attempt_real_axis_rational_residue(expr, sym_expr, path)
+    if residue_ray_result is not None:
+        return residue_ray_result
+    fourier_residue_result = _attempt_real_axis_fourier_rational_residue(expr, sym_expr, path)
+    if fourier_residue_result is not None:
+        return fourier_residue_result
+    keyhole_residue_result = _attempt_keyhole_rational_half_line_residue(expr, sym_expr, path)
+    if keyhole_residue_result is not None:
+        return keyhole_residue_result
     return _attempt_exact_antiderivative(expr, sym_expr, path)

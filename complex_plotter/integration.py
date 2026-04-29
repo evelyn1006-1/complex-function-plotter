@@ -92,6 +92,31 @@ def _integrate_ray(expr: str, start: complex, through: complex) -> NumericIntegr
     )
 
 
+def _integrate_full_line(expr: str, start: complex, through: complex) -> NumericIntegrationResult:
+    direction = through - start
+    if abs(direction) < 1e-12:
+        raise ValueError("Full-line direction cannot be zero")
+    direction /= abs(direction)
+
+    def integrand(s: float) -> complex:
+        z = start + direction * s
+        return evaluate_scalar(expr, z) * direction
+
+    warning_messages: list[str] = []
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", IntegrationWarning)
+        real_val, real_err = integrate.quad(lambda s: float(np.real(integrand(s))), -np.inf, np.inf, epsabs=1e-8, epsrel=1e-7, limit=250)
+        imag_val, imag_err = integrate.quad(lambda s: float(np.imag(integrand(s))), -np.inf, np.inf, epsabs=1e-8, epsrel=1e-7, limit=250)
+    for item in caught:
+        warning_messages.append(str(item.message))
+    return NumericIntegrationResult(
+        value=complex(real_val, imag_val),
+        abs_error=float(real_err + imag_err),
+        warnings=warning_messages,
+        converged=len(warning_messages) == 0,
+    )
+
+
 def integrate_segment(expr: str, segment: dict[str, Any]) -> NumericIntegrationResult:
     kind = segment["type"]
     if kind == "line":
@@ -163,6 +188,8 @@ def integrate_segment(expr: str, segment: dict[str, Any]) -> NumericIntegrationR
         return NumericIntegrationResult(total, error, warnings_out, len(warnings_out) == 0)
     if kind == "ray":
         return _integrate_ray(expr, to_complex(segment["start"]), to_complex(segment["through"]))
+    if kind == "full_line":
+        return _integrate_full_line(expr, to_complex(segment["start"]), to_complex(segment["through"]))
     raise ValueError(f"Unknown segment type: {kind}")
 
 

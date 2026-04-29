@@ -61,6 +61,8 @@ def segment_start(segment: dict[str, Any]) -> complex | None:
     kind = segment["type"]
     if kind in {"line", "ray", "arc", "circle", "quadratic", "cubic"}:
         return to_complex(segment["start"])
+    if kind == "full_line":
+        return None
     if kind == "polyline":
         pts = [to_complex(p) for p in segment["points"]]
         return pts[0] if pts else None
@@ -72,6 +74,8 @@ def segment_end(segment: dict[str, Any]) -> complex | None:
     if kind == "line":
         return to_complex(segment["end"])
     if kind == "ray":
+        return None
+    if kind == "full_line":
         return None
     if kind == "arc":
         center = to_complex(segment["center"])
@@ -142,6 +146,12 @@ def reverse_segment(segment: dict[str, Any]) -> dict[str, Any]:
         direction = _normalize_direction(start, through)
         fake_far = start - direction
         return {"type": "ray", "start": point_to_json(start), "through": point_to_json(fake_far)}
+    if kind == "full_line":
+        start = to_complex(segment["start"])
+        through = to_complex(segment["through"])
+        direction = _normalize_direction(start, through)
+        fake_far = start - direction
+        return {"type": "full_line", "start": point_to_json(start), "through": point_to_json(fake_far)}
     raise ValueError(f"Unknown segment type: {kind}")
 
 
@@ -276,6 +286,29 @@ def _eval_ray_finite_preview(segment: dict[str, Any], t: np.ndarray, bounds: tup
     return z, dz
 
 
+def _eval_full_line_finite_preview(segment: dict[str, Any], t: np.ndarray, bounds: tuple[float, float, float, float]) -> tuple[np.ndarray, np.ndarray]:
+    start = to_complex(segment["start"])
+    through = to_complex(segment["through"])
+    direction = _normalize_direction(start, through)
+    xmin, xmax, ymin, ymax = bounds
+
+    candidates: list[float] = []
+    if abs(np.real(direction)) > 1e-12:
+        candidates.extend([(xmin - np.real(start)) / np.real(direction), (xmax - np.real(start)) / np.real(direction)])
+    if abs(np.imag(direction)) > 1e-12:
+        candidates.extend([(ymin - np.imag(start)) / np.imag(direction), (ymax - np.imag(start)) / np.imag(direction)])
+
+    if candidates:
+        extent = max(abs(c) for c in candidates)
+    else:
+        extent = 4.0
+    extent = max(extent, 1.0)
+    parameter = (2 * t - 1) * extent
+    z = start + parameter * direction
+    dz = np.full_like(t, 2 * extent * direction, dtype=np.complex128)
+    return z, dz
+
+
 def evaluate_segment(segment: dict[str, Any], t: np.ndarray, bounds: tuple[float, float, float, float] | None = None) -> tuple[np.ndarray, np.ndarray]:
     kind = segment["type"]
     if kind == "line":
@@ -294,6 +327,10 @@ def evaluate_segment(segment: dict[str, Any], t: np.ndarray, bounds: tuple[float
         if bounds is None:
             raise ValueError("Ray preview requires bounds")
         return _eval_ray_finite_preview(segment, t, bounds)
+    if kind == "full_line":
+        if bounds is None:
+            raise ValueError("Full-line preview requires bounds")
+        return _eval_full_line_finite_preview(segment, t, bounds)
     raise ValueError(f"Unknown segment type: {kind}")
 
 

@@ -105,7 +105,7 @@ def path_from_payload(data: dict[str, Any]) -> list[dict[str, Any]]:
         raise ValueError("path must be a list of path segments.")
     if len(path) > 80:
         raise ValueError("Paths are limited to 80 segments.")
-    allowed_types = {"line", "arc", "circle", "quadratic", "cubic", "polyline", "ray"}
+    allowed_types = {"line", "arc", "circle", "quadratic", "cubic", "polyline", "ray", "full_line"}
     normalized_path: list[dict[str, Any]] = []
     for segment in path:
         if not isinstance(segment, dict):
@@ -121,6 +121,8 @@ def path_from_payload(data: dict[str, Any]) -> list[dict[str, Any]]:
             if len(points) > 3000:
                 raise ValueError("Freeform polylines are limited to 3000 points.")
         normalized_path.append(normalize_segment(segment))
+    if any(segment["type"] == "full_line" for segment in normalized_path) and len(normalized_path) != 1:
+        raise ValueError("A full-line path cannot be combined with other path segments.")
     return normalized_path
 
 

@@ -497,6 +497,7 @@
           <option value="cubic">Cubic Bézier</option>
           <option value="freeform">Polyline / freeform</option>
           <option value="ray">Ray to infinity</option>
+          <option value="full_line">Full line</option>
         </select>
       </div>
       <div>
@@ -925,6 +926,7 @@ function normalizeSegmentLocal(seg) {
 function pathStart(path) {
   if (!path.length) return null;
   const seg = path[0];
+  if (seg.type === 'full_line') return null;
   if (seg.type === 'polyline') return seg.points[0];
   return seg.start;
 }
@@ -962,6 +964,11 @@ function reverseSegmentLocal(seg) {
     const dir = subP(seg.through, seg.start);
     const m = Math.hypot(dir[0], dir[1]) || 1;
     return {type:'ray', start: seg.start, through: [seg.start[0] - dir[0] / m, seg.start[1] - dir[1] / m]};
+  }
+  if (seg.type === 'full_line') {
+    const dir = subP(seg.through, seg.start);
+    const m = Math.hypot(dir[0], dir[1]) || 1;
+    return {type:'full_line', start: seg.start, through: [seg.start[0] - dir[0] / m, seg.start[1] - dir[1] / m]};
   }
   return seg;
 }
@@ -1037,6 +1044,22 @@ function sampleSegment(seg, n=120) {
       const t = i / (n - 1);
       pts.push([seg.start[0] + u[0] * L * t, seg.start[1] + u[1] * L * t]);
     }
+  } else if (seg.type === 'full_line') {
+    const d = subP(seg.through, seg.start);
+    const m = Math.hypot(d[0], d[1]) || 1;
+    const u = [d[0] / m, d[1] / m];
+    const candidates = [];
+    if (Math.abs(u[0]) > 1e-12) {
+      candidates.push((bounds.xmin - seg.start[0]) / u[0], (bounds.xmax - seg.start[0]) / u[0]);
+    }
+    if (Math.abs(u[1]) > 1e-12) {
+      candidates.push((bounds.ymin - seg.start[1]) / u[1], (bounds.ymax - seg.start[1]) / u[1]);
+    }
+    const L = Math.max(candidates.length ? Math.max(...candidates.map(v => Math.abs(v))) : 4.0, 1.0);
+    for (let i = 0; i < n; i++) {
+      const t = -L + 2 * L * i / (n - 1);
+      pts.push([seg.start[0] + u[0] * t, seg.start[1] + u[1] * t]);
+    }
   }
   return pts;
 }
@@ -1051,12 +1074,13 @@ function makeSegmentFromPending() {
   if (tool === 'quadratic' && p.length >= 3) return {type:'quadratic', start:p[0], control:p[1], end:p[2]};
   if (tool === 'cubic' && p.length >= 4) return {type:'cubic', start:p[0], control1:p[1], control2:p[2], end:p[3]};
   if (tool === 'ray' && p.length >= 2) return {type:'ray', start:p[0], through:p[1]};
+  if (tool === 'full_line' && p.length >= 2) return {type:'full_line', start:p[0], through:p[1]};
   if (tool === 'freeform' && p.length >= 2) return {type:'polyline', points:[...p]};
   return null;
 }
 
 function requiredClicks(tool) {
-  return ({line:2, circle:2, arc:3, quadratic:3, cubic:4, ray:2, freeform:Infinity})[tool];
+  return ({line:2, circle:2, arc:3, quadratic:3, cubic:4, ray:2, full_line:2, freeform:Infinity})[tool];
 }
 
 function updateIntegrationHints() {
@@ -1070,6 +1094,7 @@ function updateIntegrationHints() {
     cubic: 'Click start, control 1, control 2, then end.',
     freeform: 'Click points along the path, then press “Finish freeform”.',
     ray: 'Click the ray start, then a second point for its direction. It will continue to infinity.',
+    full_line: 'Click a point on the line, then a second point for its direction. It will run from -∞ to ∞ and cannot be combined with other segments.',
   };
   $('integrationInstructions').textContent = `${map[tool]} Pending points: ${p}.`;
   $('pathSummary').textContent = summarizePathLocal();
@@ -1094,7 +1119,7 @@ function pathPointFields(seg) {
   if (seg.type === 'arc') return ['center', 'start', 'end'];
   if (seg.type === 'quadratic') return ['start', 'control', 'end'];
   if (seg.type === 'cubic') return ['start', 'control1', 'control2', 'end'];
-  if (seg.type === 'ray') return ['start', 'through'];
+  if (seg.type === 'ray' || seg.type === 'full_line') return ['start', 'through'];
   return [];
 }
 
@@ -1226,6 +1251,14 @@ function maybeCommitSegment() {
         setStatus(problem, 'error');
         return;
       }
+      if (seg.type === 'full_line' && state.path.length) {
+        setStatus('A full-line path cannot be combined with other segments.', 'error');
+        return;
+      }
+      if (state.path.some(existing => existing.type === 'full_line')) {
+        setStatus('A full-line path cannot be combined with other segments.', 'error');
+        return;
+      }
       state.path.push(seg);
       state.pending = [];
       clearIntegrationResult();
@@ -1240,6 +1273,10 @@ function finishPendingSegment() {
     const problem = segmentProblem(seg);
     if (problem) {
       setStatus(problem, 'error');
+      return;
+    }
+    if (state.path.some(existing => existing.type === 'full_line')) {
+      setStatus('A full-line path cannot be combined with other segments.', 'error');
       return;
     }
     state.path.push(seg);
@@ -1273,6 +1310,7 @@ function segmentProblem(seg) {
   if (seg.type === 'circle' && dist(seg.center, seg.start) <= eps) return 'Circle radius is too small.';
   if (seg.type === 'arc' && (dist(seg.center, seg.start) <= eps || dist(seg.center, seg.end) <= eps)) return 'Arc radius is too small.';
   if (seg.type === 'ray' && dist(seg.start, seg.through) <= eps) return 'Ray direction point must differ from the start.';
+  if (seg.type === 'full_line' && dist(seg.start, seg.through) <= eps) return 'Full-line direction point must differ from the line point.';
   if (seg.type === 'polyline' && seg.points.length < 2) return 'Freeform path needs at least two points.';
   return '';
 }
