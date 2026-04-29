@@ -9,7 +9,7 @@ import sympy as sp
 
 from .expressions import ENTIRE_FUNCTIONS, SAFE_CONSTANTS, analyze_expression, _parsed_expression
 from .number_labels import complex_component_labels
-from .paths import distance_to_path, finite_endpoints, is_closed_path, winding_number
+from .paths import distance_to_path, finite_endpoints, is_closed_path, segment_end, segment_start, to_complex, winding_number
 
 
 Z = sp.Symbol("z")
@@ -149,7 +149,10 @@ def _sympy_expr(expr: str) -> sp.Expr | None:
 
 
 def _complex_from_sympy(value: sp.Expr) -> complex | None:
-    numeric = complex(sp.N(value, 18))
+    try:
+        numeric = complex(sp.N(value, 18))
+    except (TypeError, ValueError):
+        return None
     if not math.isfinite(numeric.real) or not math.isfinite(numeric.imag):
         return None
     return numeric
@@ -486,6 +489,60 @@ def _sympy_point(point: complex) -> sp.Expr:
     return sp.Rational(repr(float(np.real(point)))) + sp.I * sp.Rational(repr(float(np.imag(point))))
 
 
+def _sympy_ray_direction(segment: dict[str, Any]) -> sp.Expr | None:
+    start = to_complex(segment["start"])
+    through = to_complex(segment["through"])
+    direction = through - start
+    if abs(direction) < 1e-12:
+        return None
+
+    if abs(direction.imag) <= 1e-12:
+        return sp.Integer(1) if direction.real > 0 else sp.Integer(-1)
+    if abs(direction.real) <= 1e-12:
+        return sp.I if direction.imag > 0 else -sp.I
+
+    unit = direction / abs(direction)
+    return _sympy_point(unit)
+
+
+def _clean_finite_limit(value: sp.Expr) -> sp.Expr | None:
+    value = sp.trigsimp(sp.simplify(value.rewrite(sp.sin)))
+    if value in (sp.oo, -sp.oo, sp.zoo, sp.nan) or value.has(sp.oo, -sp.oo, sp.zoo, sp.nan):
+        return None
+    if value.has(sp.Limit, sp.Integral):
+        return None
+    if _complex_from_sympy(value) is None:
+        return None
+    return value
+
+
+def _antiderivative_delta_for_segment(antiderivative: sp.Expr, segment: dict[str, Any]) -> sp.Expr | None:
+    start = segment_start(segment)
+    if start is None:
+        return None
+    start_expr = _sympy_point(start)
+
+    if segment["type"] == "ray":
+        direction = _sympy_ray_direction(segment)
+        if direction is None:
+            return None
+        s = sp.Symbol("s", positive=True, real=True)
+        ray_expr = start_expr + direction * s
+        try:
+            tail_value = sp.limit(antiderivative.subs(Z, ray_expr), s, sp.oo)
+        except Exception:
+            return None
+        tail_value = _clean_finite_limit(tail_value)
+        if tail_value is None:
+            return None
+        return sp.simplify(tail_value - antiderivative.subs(Z, start_expr))
+
+    end = segment_end(segment)
+    if end is None:
+        return None
+    return sp.simplify(antiderivative.subs(Z, _sympy_point(end)) - antiderivative.subs(Z, start_expr))
+
+
 def _attempt_exact_antiderivative(
     expr: str,
     sym_expr: sp.Expr,
@@ -495,10 +552,11 @@ def _attempt_exact_antiderivative(
     if not features.proven_entire:
         return None
 
+    has_ray = any(segment["type"] == "ray" for segment in path)
     start, end = finite_endpoints(path)
-    if start is None or end is None:
+    if start is None or (end is None and not has_ray):
         return None
-    if abs(start - end) <= 1e-12:
+    if not has_ray and end is not None and abs(start - end) <= 1e-12:
         return _result(
             value=sp.Integer(0),
             notes=["Exact mode: the contour is closed and the integrand is in the app's conservative entire-function class."],
@@ -507,7 +565,20 @@ def _attempt_exact_antiderivative(
     antiderivative = sp.integrate(sym_expr, Z)
     if antiderivative.has(sp.Integral):
         return None
-    value = sp.simplify(antiderivative.subs(Z, _sympy_point(end)) - antiderivative.subs(Z, _sympy_point(start)))
+
+    deltas: list[sp.Expr] = []
+    for segment in path:
+        delta = _antiderivative_delta_for_segment(antiderivative, segment)
+        if delta is None:
+            return None
+        deltas.append(delta)
+
+    value = sp.simplify(sum(deltas, sp.Integer(0)))
+    if has_ray:
+        return _result(
+            value=value,
+            notes=["Exact mode: used a SymPy antiderivative and a convergent symbolic limit along the ray to infinity."],
+        )
     return _result(
         value=value,
         notes=["Exact mode: used a SymPy antiderivative of an entire integrand, so the value depends only on endpoints."],

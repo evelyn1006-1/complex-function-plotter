@@ -33,6 +33,7 @@ After drawing, the app computes the contour integral with **Exact first** mode b
 Exact mode currently handles:
 - **Closed contours** where SymPy can enumerate isolated meromorphic singularities in the plot bounds, including polynomial denominators and common Laurent-series cases like `1/sin(z)` or `1/(exp(z)-1)`. Individual enclosed residues are shown exactly too.
 - **Open contours** of conservatively recognized entire functions when SymPy finds an elementary antiderivative
+- **Rays to infinity** of conservatively recognized entire functions when SymPy finds an antiderivative and a finite symbolic limit along the ray
 
 For exact residues, the result panel includes local observability such as pole order, Laurent expansion snippets, and denominator series when available.
 
@@ -169,7 +170,7 @@ Examples:
 - Integration mode is intentionally conservative about theorem shortcuts.
 - Branch cuts and non-analytic expressions fall back to direct numerical path integration.
 - Principal value integrals are **not** implemented automatically.
-- Rays to infinity are supported, but divergent or conditionally convergent cases may still produce warnings or non-finite results.
+- Rays to infinity can be exact when a symbolic antiderivative has a finite limit along the ray; divergent, conditionally convergent, or symbolically ambiguous cases fall back to numerical quadrature and may still produce warnings or non-finite results.
 - Bound inputs accept decimal numbers and fractions like `1/2` or `-3/4`.
 
 Love you always and forever!~
