@@ -8,6 +8,7 @@ from complex_plotter.webapp import path_from_payload
 
 RAY_POSITIVE_REAL = [{"type": "ray", "start": [0, 0], "through": [1, 0]}]
 FULL_REAL_LINE = [{"type": "full_line", "start": [0, 0], "through": [1, 0]}]
+REVERSED_FULL_REAL_LINE = [{"type": "full_line", "start": [0, 0], "through": [-1, 0]}]
 BOUNDS = (-1, 3, -1, 1)
 
 
@@ -115,6 +116,54 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(any("keyhole contour" in note for note in result["notes"]))
         self.assertAlmostEqual(result["value"][0], 2 * math.pi / (3 * math.sqrt(3)))
         self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_higher_degree_even_rational_half_line_residue_derivation(self) -> None:
+        result = integrate_path("1/(z**4+1)", RAY_POSITIVE_REAL, (-1, 4, -2, 2), method_mode="auto")
+
+        self.assertEqual(result["method"], "residue-derivation")
+        self.assertEqual(result["exact_value"], "sqrt(2)*pi/4")
+        self.assertAlmostEqual(result["value"][0], math.pi / (2 * math.sqrt(2)))
+        self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_shifted_noneven_rational_full_line_residue_derivation(self) -> None:
+        result = integrate_path("1/(z**2+2*z+2)", FULL_REAL_LINE, (-5, 5, -3, 3), method_mode="auto")
+
+        self.assertEqual(result["method"], "residue-derivation")
+        self.assertEqual(result["exact_value"], "pi")
+        self.assertAlmostEqual(result["value"][0], math.pi)
+        self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_cosine_rational_with_frequency_and_scaled_pole(self) -> None:
+        result = integrate_path("cos(3*z)/(z**2+4)", RAY_POSITIVE_REAL, (-1, 5, -3, 3), method_mode="auto")
+
+        self.assertEqual(result["method"], "residue-derivation")
+        self.assertEqual(result["exact_value"], "pi*exp(-6)/4")
+        self.assertAlmostEqual(result["value"][0], math.pi * math.exp(-6) / 4)
+        self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_negative_frequency_exponential_uses_lower_half_plane(self) -> None:
+        result = integrate_path("exp(-i*z)/(z**2+1)", FULL_REAL_LINE, (-4, 4, -2, 2), method_mode="auto")
+
+        self.assertEqual(result["method"], "residue-derivation")
+        self.assertEqual(result["exact_value"], "pi*exp(-1)")
+        self.assertTrue(any("lower half-plane" in note for note in result["notes"]))
+        self.assertAlmostEqual(result["value"][0], math.pi / math.e)
+        self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_reversed_full_line_orientation_is_preserved(self) -> None:
+        result = integrate_path("1/(z**2+1)", REVERSED_FULL_REAL_LINE, (-3, 3, -2, 2), method_mode="auto")
+
+        self.assertEqual(result["exact_value"], "-pi")
+        self.assertAlmostEqual(result["value"][0], -math.pi)
+        self.assertAlmostEqual(result["value"][1], 0.0)
+
+    def test_pole_beyond_viewport_on_ray_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "lies on the ray to infinity"):
+            integrate_path("1/(z-5)**2", RAY_POSITIVE_REAL, (-1, 1, -1, 1), method_mode="auto")
+
+    def test_real_axis_pole_is_rejected_instead_of_using_residue_shortcut(self) -> None:
+        with self.assertRaisesRegex(ValueError, "non-finite value"):
+            integrate_path("1/(z**2-1)", RAY_POSITIVE_REAL, (-0.5, 0.5, -1, 1), method_mode="auto")
 
 
 if __name__ == "__main__":
