@@ -257,6 +257,20 @@
       gap: 0.55rem;
       margin: 0.35rem 0 0.55rem;
     }
+    .action-strip {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 0.55rem;
+      margin-top: 0.7rem;
+    }
+    .action-strip button {
+      width: auto;
+      min-width: 8.5rem;
+      padding: 0.52rem 0.72rem;
+      border-radius: 999px;
+      font-size: 0.9rem;
+    }
     .plot-toggle {
       display: inline-flex;
       align-items: center;
@@ -498,6 +512,10 @@
       <div id="classReason" class="class-reason hidden"></div>
     </div>
   </div>
+  <div class="action-strip">
+    <button id="shareUrlBtn" type="button">Copy share URL</button>
+    <button id="exportPlotBtn" type="button">Export plot PNG</button>
+  </div>
   </section>
 
   <div class="examples hidden" id="integrationExamples">
@@ -550,6 +568,9 @@
     <div class="mini" id="integrationInfo"></div>
     <h3>Editable path data</h3>
     <div class="path-table-wrap" id="pathTableWrap"></div>
+    <div class="action-strip">
+      <button id="exportIntegrationBtn" type="button">Export result TXT</button>
+    </div>
     <div class="result" id="integrationResult"></div>
   </div>
 
@@ -605,12 +626,22 @@ const state = {
   classifyTimer: null,
   probeTimer: null,
   autoRenderTimer: null,
+  urlSyncTimer: null,
   lastProbePoint: null,
 };
+
+const URL_STATE_INPUT_IDS = [
+  'expr', 'mode', 'n', 'xmin', 'xmax', 'ymin', 'ymax', 'stride', 'frames',
+  'vectorCap', 'gridLines', 'gridSamples', 'transformHighlight',
+  'transformHighlightA', 'transformHighlightB', 'transformHighlightC',
+  'tool', 'arcOrientation', 'integrationMethod',
+  'highlightZeros', 'showSingularities', 'autoRender',
+];
 
 for (const btn of document.querySelectorAll('#plotExamples button')) {
   btn.addEventListener('click', () => {
     $('expr').value = btn.dataset.expr;
+    scheduleUrlStateSync();
     scheduleClassification({immediate: true});
     if ($('mode').value === 'integration') {
       clearIntegrationResult();
@@ -630,6 +661,16 @@ $('pathTableWrap').addEventListener('change', onPathEditorChange);
 $('pathTableWrap').addEventListener('click', onPathEditorClick);
 $('functionBadge').addEventListener('click', onClassBadgeClick);
 $('integrationResult').addEventListener('click', onExactFormulaClick);
+$('shareUrlBtn').addEventListener('click', copyShareUrl);
+$('exportPlotBtn').addEventListener('click', exportPlotPng);
+$('exportIntegrationBtn').addEventListener('click', exportIntegrationResult);
+
+for (const id of URL_STATE_INPUT_IDS) {
+  const el = $(id);
+  if (!el) continue;
+  const eventName = el instanceof HTMLInputElement && el.type !== 'checkbox' ? 'input' : 'change';
+  el.addEventListener(eventName, scheduleUrlStateSync);
+}
 
 $('plotBtn').addEventListener('click', () => {
   if ($('mode').value === 'integration') runIntegration();
@@ -674,6 +715,7 @@ $('resetViewBtn').addEventListener('click', () => {
   state.viewportBounds = null;
   setInputBounds(DEFAULT_BOUNDS);
   clearIntegrationResult();
+  scheduleUrlStateSync();
   if (modeIsIntegration()) renderIntegrationPreview();
   else renderPlot({forceInputBounds: true});
 });
@@ -801,6 +843,285 @@ function rangesToBounds(xrange, yrange) {
   return boundsForLayout();
 }
 
+function boolParam(params, key) {
+  const value = params.get(key);
+  return value === '1' || value === 'true' || value === 'yes';
+}
+
+function setControlFromParam(params, id, key=id) {
+  if (!params.has(key) || !$(id)) return;
+  $(id).value = params.get(key);
+}
+
+function setCheckboxFromParam(params, id, key=id) {
+  if (!params.has(key) || !$(id)) return;
+  $(id).checked = boolParam(params, key);
+}
+
+function encodeJsonParam(value) {
+  const json = JSON.stringify(value);
+  const bytes = new TextEncoder().encode(json);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeJsonParam(value) {
+  let base64 = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  while (base64.length % 4) base64 += '=';
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, ch => ch.charCodeAt(0));
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+function clonePoint(point) {
+  if (!Array.isArray(point) || point.length < 2) return null;
+  const x = Number(point[0]);
+  const y = Number(point[1]);
+  return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
+}
+
+function cloneSegmentPoint(seg, key) {
+  return clonePoint(seg && seg[key]);
+}
+
+function sanitizeUrlSegment(seg) {
+  if (!seg || typeof seg.type !== 'string') return null;
+  if (seg.type === 'line') {
+    const start = cloneSegmentPoint(seg, 'start'), end = cloneSegmentPoint(seg, 'end');
+    return start && end ? {type:'line', start, end} : null;
+  }
+  if (seg.type === 'circle') {
+    const center = cloneSegmentPoint(seg, 'center'), start = cloneSegmentPoint(seg, 'start');
+    return center && start ? {type:'circle', center, start, ccw: seg.ccw !== false} : null;
+  }
+  if (seg.type === 'arc') {
+    const center = cloneSegmentPoint(seg, 'center'), start = cloneSegmentPoint(seg, 'start'), end = cloneSegmentPoint(seg, 'end');
+    return center && start && end ? normalizeSegmentLocal({type:'arc', center, start, end, ccw: seg.ccw !== false}) : null;
+  }
+  if (seg.type === 'quadratic') {
+    const start = cloneSegmentPoint(seg, 'start'), control = cloneSegmentPoint(seg, 'control'), end = cloneSegmentPoint(seg, 'end');
+    return start && control && end ? {type:'quadratic', start, control, end} : null;
+  }
+  if (seg.type === 'cubic') {
+    const start = cloneSegmentPoint(seg, 'start'), control1 = cloneSegmentPoint(seg, 'control1'), control2 = cloneSegmentPoint(seg, 'control2'), end = cloneSegmentPoint(seg, 'end');
+    return start && control1 && control2 && end ? {type:'cubic', start, control1, control2, end} : null;
+  }
+  if (seg.type === 'polyline') {
+    const points = Array.isArray(seg.points) ? seg.points.map(clonePoint).filter(Boolean) : [];
+    return points.length >= 2 ? {type:'polyline', points} : null;
+  }
+  if (seg.type === 'ray' || seg.type === 'full_line') {
+    const start = cloneSegmentPoint(seg, 'start'), through = cloneSegmentPoint(seg, 'through');
+    return start && through ? {type:seg.type, start, through} : null;
+  }
+  return null;
+}
+
+function sanitizeUrlPath(rawPath) {
+  if (!Array.isArray(rawPath) || rawPath.length > 80) return [];
+  const path = rawPath.map(sanitizeUrlSegment).filter(Boolean);
+  return path.some(seg => seg.type === 'full_line') && path.length > 1 ? [] : path;
+}
+
+function loadStateFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  if (![...params.keys()].length) return false;
+
+  setControlFromParam(params, 'expr');
+  setControlFromParam(params, 'mode');
+  setControlFromParam(params, 'n');
+  setControlFromParam(params, 'stride');
+  setControlFromParam(params, 'frames');
+  setControlFromParam(params, 'vectorCap', 'vector_cap');
+  setControlFromParam(params, 'gridLines', 'grid_lines');
+  setControlFromParam(params, 'gridSamples', 'grid_samples');
+  setControlFromParam(params, 'transformHighlight', 'curve');
+  setControlFromParam(params, 'transformHighlightA', 'curve_a');
+  setControlFromParam(params, 'transformHighlightB', 'curve_b');
+  setControlFromParam(params, 'transformHighlightC', 'curve_c');
+  setControlFromParam(params, 'tool');
+  setControlFromParam(params, 'arcOrientation', 'orientation');
+  setControlFromParam(params, 'integrationMethod', 'integration_method');
+  setCheckboxFromParam(params, 'highlightZeros', 'zeros');
+  setCheckboxFromParam(params, 'showSingularities', 'singularities');
+  setCheckboxFromParam(params, 'autoRender', 'auto_render');
+
+  const bounds = {};
+  for (const key of ['xmin', 'xmax', 'ymin', 'ymax']) {
+    if (params.has(key)) bounds[key] = parseNumericText(params.get(key));
+  }
+  if (boundsAreValid(bounds)) {
+    state.viewportBounds = bounds;
+    setInputBounds(bounds);
+  }
+
+  if (params.has('path')) {
+    try {
+      state.path = sanitizeUrlPath(decodeJsonParam(params.get('path')));
+    } catch (_err) {
+      state.path = [];
+      window.setTimeout(() => setStatus('The shared path data could not be loaded.', 'warning'), 0);
+    }
+  }
+  state.pending = [];
+  return true;
+}
+
+function shareStateBounds() {
+  return getPlotVisibleBounds() || (state.viewportBounds && boundsAreValid(state.viewportBounds) ? state.viewportBounds : currentBounds());
+}
+
+function buildShareUrl() {
+  const url = new URL(window.location.href);
+  const params = new URLSearchParams();
+  const mode = $('mode').value;
+  const bounds = shareStateBounds();
+  params.set('expr', $('expr').value);
+  params.set('mode', mode);
+  if (boundsAreValid(bounds)) {
+    params.set('xmin', formatInputNumber(bounds.xmin));
+    params.set('xmax', formatInputNumber(bounds.xmax));
+    params.set('ymin', formatInputNumber(bounds.ymin));
+    params.set('ymax', formatInputNumber(bounds.ymax));
+  }
+  params.set('n', $('n').value);
+  if (mode === 'vectors') {
+    params.set('stride', $('stride').value);
+    params.set('vector_cap', $('vectorCap').value);
+  }
+  if (mode === 'transform') {
+    params.set('frames', $('frames').value);
+    params.set('grid_lines', $('gridLines').value);
+    params.set('grid_samples', $('gridSamples').value);
+    params.set('curve', $('transformHighlight').value);
+    params.set('curve_a', $('transformHighlightA').value);
+    params.set('curve_b', $('transformHighlightB').value);
+    params.set('curve_c', $('transformHighlightC').value);
+  }
+  if ($('highlightZeros').checked) params.set('zeros', '1');
+  if ($('showSingularities').checked) params.set('singularities', '1');
+  if ($('autoRender').checked) params.set('auto_render', '1');
+  if (mode === 'integration') {
+    params.set('tool', $('tool').value);
+    params.set('orientation', $('arcOrientation').value);
+    params.set('integration_method', $('integrationMethod').value);
+    if (state.path.length) params.set('path', encodeJsonParam(state.path));
+  }
+  url.search = params.toString();
+  url.hash = '';
+  return url;
+}
+
+function scheduleUrlStateSync() {
+  window.clearTimeout(state.urlSyncTimer);
+  state.urlSyncTimer = window.setTimeout(syncUrlState, 180);
+}
+
+function syncUrlState() {
+  window.clearTimeout(state.urlSyncTimer);
+  const url = buildShareUrl();
+  history.replaceState(history.state, '', `${url.pathname}${url.search}`);
+}
+
+async function copyShareUrl() {
+  syncUrlState();
+  const text = buildShareUrl().toString();
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const temp = document.createElement('textarea');
+      temp.value = text;
+      temp.setAttribute('readonly', '');
+      temp.style.position = 'fixed';
+      temp.style.left = '-9999px';
+      document.body.appendChild(temp);
+      temp.select();
+      document.execCommand('copy');
+      temp.remove();
+    }
+    setStatus('Share URL copied.', 'success');
+  } catch (err) {
+    setStatus(`Could not copy URL: ${err.message || err}`, 'error');
+  }
+}
+
+function safeFilenamePart(text, fallback='complex') {
+  const slug = String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  return slug || fallback;
+}
+
+function exportTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+async function exportPlotPng() {
+  const gd = $('plot');
+  if (!gd || !gd._fullLayout) {
+    setStatus('Render a plot before exporting it.', 'error');
+    return;
+  }
+  try {
+    await Plotly.downloadImage(gd, {
+      format: 'png',
+      filename: `${safeFilenamePart($('expr').value, 'complex-plot')}-${exportTimestamp()}`,
+      width: 1600,
+      height: 1100,
+      scale: 2,
+    });
+    setStatus('Plot PNG export started.', 'success');
+  } catch (err) {
+    setStatus(`Plot export failed: ${err.message || err}`, 'error');
+  }
+}
+
+function downloadTextFile(text, filename, type='text/plain;charset=utf-8') {
+  const blob = new Blob([text], {type});
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function integrationExportText() {
+  const bounds = shareStateBounds();
+  const lines = [
+    'Complex Function Plotter integration export',
+    `Expression: ${$('expr').value}`,
+    `Method: ${$('integrationMethod').value}`,
+  ];
+  if (boundsAreValid(bounds)) {
+    lines.push(`Bounds: xmin=${formatInputNumber(bounds.xmin)}, xmax=${formatInputNumber(bounds.xmax)}, ymin=${formatInputNumber(bounds.ymin)}, ymax=${formatInputNumber(bounds.ymax)}`);
+  }
+  lines.push(`Share URL: ${buildShareUrl().toString()}`);
+  lines.push('');
+  lines.push('Result:');
+  lines.push(($('integrationResult').innerText || '').trim());
+  lines.push('');
+  lines.push('Path JSON:');
+  lines.push(JSON.stringify(state.path, null, 2));
+  return lines.join('\n');
+}
+
+function exportIntegrationResult() {
+  if (!state.serverIntegration) {
+    setStatus('Run an integration before exporting the result.', 'error');
+    return;
+  }
+  const filename = `complex-integral-${safeFilenamePart($('expr').value, 'result')}-${exportTimestamp()}.txt`;
+  downloadTextFile(integrationExportText(), filename);
+  setStatus('Integration result export started.', 'success');
+}
+
 function readBoundedInteger(id, min, max, label) {
   const value = readNumericInput(id);
   if (!Number.isInteger(value) || value < min || value > max) {
@@ -861,6 +1182,7 @@ function onAutoRenderChange() {
 function clearIntegrationResult() {
   state.serverIntegration = null;
   $('integrationResult').textContent = '';
+  updateButtonStates();
 }
 
 function clearPathState() {
@@ -1555,6 +1877,7 @@ function onPlotRelayout(_eventData) {
   if (!bounds) return;
   state.viewportBounds = bounds;
   setInputBounds(bounds);
+  scheduleUrlStateSync();
   if (modeIsIntegration()) {
     state.integrationBackdrop = null;
     requestIntegrationBackdrop(bounds);
@@ -1941,6 +2264,7 @@ function updateButtonStates() {
   $('closeLoopBtn').disabled = !!state.pending.length || !pathStart(state.path) || !pathEnd(state.path) || isClosedLocal(state.path);
   $('reversePathBtn').disabled = !!state.pending.length || !state.path.length;
   $('clearPathBtn').disabled = !state.pending.length && !state.path.length;
+  $('exportIntegrationBtn').disabled = !state.serverIntegration;
 }
 
 function renderIntegrationPreview(options={}) {
@@ -1960,6 +2284,7 @@ function renderIntegrationPreview(options={}) {
   ensurePlotHandler();
   updateIntegrationHints();
   if (options.refreshBackdrop !== false) requestIntegrationBackdrop(bounds);
+  scheduleUrlStateSync();
   return true;
 }
 
@@ -2029,6 +2354,7 @@ async function renderPlot(options={}) {
     setStatus(data.message || '', data.status === 'warning' ? 'warning' : 'success');
     if (data.kind === 'image') {
       await renderDomainImage(data);
+      scheduleUrlStateSync();
       return;
     }
 
@@ -2040,6 +2366,7 @@ async function renderPlot(options={}) {
     if (data.kind === 'vectors') {
       await Plotly.react('plot', data.traces, layout, PLOTLY_CONFIG);
       ensurePlotHandler();
+      scheduleUrlStateSync();
       return;
     }
     if (data.kind === 'transform') {
@@ -2054,6 +2381,7 @@ async function renderPlot(options={}) {
       await Plotly.newPlot('plot', data.traces, layout, PLOTLY_CONFIG);
       await Plotly.addFrames('plot', data.frames);
       ensurePlotHandler();
+      scheduleUrlStateSync();
     }
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -2076,6 +2404,7 @@ async function renderDomainImage(data) {
   layout.images = [domainImageLayer(data.data_uri, bounds, 1)];
   await Plotly.react('plot', [...(data.zero_traces || []), ...(data.singularity_traces || [])], layout, PLOTLY_CONFIG);
   ensurePlotHandler();
+  scheduleUrlStateSync();
 }
 
 function appendResultText(container, text) {
@@ -2198,6 +2527,7 @@ function renderIntegrationResult(data) {
   }
   addLatexPreview(result);
   updateButtonStates();
+  scheduleUrlStateSync();
 }
 
 async function runIntegration() {
@@ -2264,6 +2594,7 @@ function loadIntegrationExample(name) {
   }
   scheduleClassification({immediate: true});
   renderIntegrationPreview();
+  scheduleUrlStateSync();
 }
 
 function onModeChange() {
@@ -2291,6 +2622,7 @@ function onModeChange() {
   }
 }
 
+loadStateFromUrl();
 scheduleClassification({immediate: true});
 onModeChange();
 </script>
